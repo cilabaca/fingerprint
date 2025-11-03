@@ -1,0 +1,16 @@
+# Requirements para ZKTeco Bridge Service
+# Instalar con: pip install -r requirements.txt
+
+# Framework web
+Flask==2.3.0
+Werkzeug==2.3.0
+
+# CORS para permitir solicitudes desde el frontend
+flask-cors==4.0.0
+
+# Para interactuar con Windows API (solo Windows)
+pywin32==306
+
+# Utilidades adicionales opcionales
+python-dotenv==1.0.0  # Para variables de entorno
+requests==2.31.0      # Para hacer llamadas HTTP si es necesario
