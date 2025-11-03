@@ -1,168 +1,79 @@
-2025-11-02 21:26:17,935 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
-2025-11-02 21:26:17,936 - __main__ - INFO - Ejecutando en modo 64-bit
-2025-11-02 21:26:33,723 - __main__ - INFO - DLL cargada exitosamente
-2025-11-02 21:26:33,725 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
-2025-11-02 21:26:33,768 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
-2025-11-02 21:26:34,333 - __main__ - INFO - Solicitud: Inicializar dispositivo
-2025-11-02 21:26:34,337 - __main__ - INFO - Inicializando dispositivo...
-2025-11-02 21:26:37,439 - __main__ - INFO - Código de retorno de Init: 0
-2025-11-02 21:26:37,440 - __main__ - INFO - Dispositivos detectados: 1
-2025-11-02 21:26:41,094 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
-2025-11-02 21:26:41,095 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
-2025-11-02 21:26:42,414 - __main__ - INFO - Handle obtenido: 1839606075696
-2025-11-02 21:26:43,386 - __main__ - INFO - Dispositivo abierto correctamente
-2025-11-02 21:26:43,386 - __main__ - INFO - Dimensiones de imagen: 284x363
-2025-11-02 21:26:43,390 - __main__ - INFO - Loop de captura iniciado
-2025-11-02 21:26:43,390 - __main__ - INFO - Captura iniciada
-2025-11-02 21:26:43,391 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
-2025-11-02 21:27:12,098 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
-2025-11-02 21:27:12,099 - __main__ - INFO - Modo cambiado a: registering
-2025-11-02 21:27:13,001 - __main__ - INFO - Captura 1 de 3 para registro - Template size: 830 bytes
-2025-11-02 21:27:13,002 - __main__ - INFO - Progreso: 1/3 capturas
-2025-11-02 21:27:14,992 - __main__ - INFO - Captura 2 de 3 para registro - Template size: 878 bytes
-2025-11-02 21:27:14,992 - __main__ - INFO - Progreso: 2/3 capturas
-2025-11-02 21:27:17,254 - __main__ - INFO - Captura 3 de 3 para registro - Template size: 868 bytes
-2025-11-02 21:27:17,255 - __main__ - INFO - 3 CAPTURAS COMPLETADAS - Generando plantilla final...
-2025-11-02 21:27:17,255 - __main__ - INFO - Intento 1 de 2 para generar plantilla final
-2025-11-02 21:27:17,503 - __main__ - INFO - Resultado de GenRegTemplate: -7
-2025-11-02 21:27:17,504 - __main__ - ERROR - Error al generar plantilla (intento 1): Handle inválido
-2025-11-02 21:27:17,504 - __main__ - WARNING - Error de handle inválido - intentando reconexión
-2025-11-02 21:27:17,505 - __main__ - WARNING - Intentando reconexión automática del dispositivo...
-2025-11-02 21:27:17,505 - __main__ - INFO - Deteniendo captura...
-2025-11-02 21:27:20,536 - __main__ - WARNING - El hilo de captura no terminó en el tiempo esperado
-2025-11-02 21:27:20,536 - __main__ - INFO - Captura detenida
-2025-11-02 21:27:21,539 - __main__ - INFO - Dispositivo anterior cerrado
-2025-11-02 21:27:21,540 - __main__ - INFO - SDK terminado
-2025-11-02 21:27:23,542 - __main__ - INFO - Reinicializando SDK...
-2025-11-02 22:23:27,228 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
-2025-11-02 22:23:27,230 - __main__ - INFO - Ejecutando en modo 64-bit
-2025-11-02 22:23:28,130 - __main__ - INFO - DLL cargada exitosamente
-2025-11-02 22:23:28,130 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
-2025-11-02 22:23:28,139 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
-2025-11-02 22:23:48,075 - __main__ - INFO - Solicitud: Inicializar dispositivo
-2025-11-02 22:23:48,076 - __main__ - INFO - Inicializando dispositivo...
-2025-11-02 22:23:48,825 - __main__ - INFO - Código de retorno de Init: 0
-2025-11-02 22:23:48,826 - __main__ - INFO - Dispositivos detectados: 1
-2025-11-02 22:23:53,373 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
-2025-11-02 22:23:53,374 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
-2025-11-02 22:23:54,676 - __main__ - INFO - Handle obtenido: 2183720931632
-2025-11-02 22:23:54,677 - __main__ - INFO - Dispositivo abierto correctamente
-2025-11-02 22:23:54,678 - __main__ - INFO - Dimensiones de imagen: 284x363
-2025-11-02 22:23:54,679 - __main__ - INFO - Loop de captura iniciado
-2025-11-02 22:23:54,679 - __main__ - INFO - Captura iniciada
-2025-11-02 22:23:54,680 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
-2025-11-02 22:24:06,485 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
-2025-11-02 22:24:06,593 - __main__ - ERROR - Error interno del servidor: 500 Internal Server Error: The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.
-2025-11-02 22:55:02,232 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
-2025-11-02 22:55:02,234 - __main__ - INFO - Ejecutando en modo 64-bit
-2025-11-02 22:55:02,288 - __main__ - INFO - DLL cargada exitosamente
-2025-11-02 22:55:02,288 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
-2025-11-02 22:55:02,299 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
-2025-11-02 22:55:59,841 - __main__ - INFO - Solicitud: Inicializar dispositivo
-2025-11-02 22:55:59,841 - __main__ - INFO - Inicializando dispositivo...
-2025-11-02 22:56:00,037 - __main__ - INFO - Código de retorno de Init: 0
-2025-11-02 22:56:00,038 - __main__ - INFO - Dispositivos detectados: 1
-2025-11-02 22:56:03,177 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
-2025-11-02 22:56:03,178 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
-2025-11-02 22:56:04,488 - __main__ - INFO - Handle obtenido: 2223836588256
-2025-11-02 22:56:04,489 - __main__ - INFO - Dispositivo abierto correctamente
-2025-11-02 22:56:04,492 - __main__ - INFO - Dimensiones de imagen: 284x363
-2025-11-02 22:56:04,494 - __main__ - INFO - Loop de captura iniciado
-2025-11-02 22:56:04,495 - __main__ - INFO - Captura iniciada
-2025-11-02 22:56:04,496 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
-2025-11-02 22:56:16,675 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
-2025-11-02 22:56:16,676 - __main__ - INFO - Modo cambiado a: registering
-2025-11-02 22:56:17,639 - __main__ - INFO - Captura 1 de 3 para registro - Template size: 578 bytes
-2025-11-02 22:56:17,639 - __main__ - INFO - Progreso: 1/3 capturas
-2025-11-02 22:56:19,463 - __main__ - INFO - Captura 2 de 3 para registro - Template size: 626 bytes
-2025-11-02 22:56:19,464 - __main__ - INFO - Progreso: 2/3 capturas
-2025-11-02 22:56:20,877 - __main__ - INFO - Captura 3 de 3 para registro - Template size: 748 bytes
-2025-11-02 22:56:20,878 - __main__ - INFO - 3 CAPTURAS COMPLETADAS - Generando plantilla final...
-2025-11-02 22:56:20,878 - __main__ - INFO - Intento 1 de 2 para generar plantilla final
-2025-11-02 22:56:20,883 - __main__ - INFO - Resultado de GenRegTemplate: -7
-2025-11-02 22:56:20,884 - __main__ - ERROR - Error al generar plantilla (intento 1): Handle inválido
-2025-11-02 22:56:20,884 - __main__ - WARNING - Error de handle inválido - intentando reconexión
-2025-11-02 22:56:20,885 - __main__ - WARNING - Intentando reconexión automática del dispositivo...
-2025-11-02 22:56:20,885 - __main__ - INFO - Deteniendo captura...
-2025-11-02 22:56:23,917 - __main__ - WARNING - El hilo de captura no terminó en el tiempo esperado
-2025-11-02 22:56:23,917 - __main__ - INFO - Captura detenida
-2025-11-02 22:56:24,919 - __main__ - INFO - Dispositivo anterior cerrado
-2025-11-02 22:56:24,920 - __main__ - INFO - SDK terminado
-2025-11-02 22:56:26,921 - __main__ - INFO - Reinicializando SDK...
-2025-11-03 00:08:49,505 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
-2025-11-03 00:08:49,506 - __main__ - INFO - Ejecutando en modo 64-bit
-2025-11-03 00:08:50,508 - __main__ - INFO - DLL cargada exitosamente
-2025-11-03 00:08:50,508 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
-2025-11-03 00:08:50,520 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
-2025-11-03 00:09:00,907 - __main__ - INFO - Solicitud: Inicializar dispositivo
-2025-11-03 00:09:00,907 - __main__ - INFO - Inicializando dispositivo...
-2025-11-03 00:09:01,332 - __main__ - INFO - Código de retorno de Init: 0
-2025-11-03 00:09:01,334 - __main__ - INFO - Dispositivos detectados: 1
-2025-11-03 00:09:03,794 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
-2025-11-03 00:09:03,795 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
-2025-11-03 00:09:05,106 - __main__ - INFO - Handle obtenido: 1600308646192
-2025-11-03 00:09:05,108 - __main__ - INFO - Dispositivo abierto correctamente
-2025-11-03 00:09:05,111 - __main__ - INFO - Dimensiones de imagen: 284x363
-2025-11-03 00:09:05,116 - __main__ - INFO - Loop de captura iniciado
-2025-11-03 00:09:05,117 - __main__ - INFO - Captura iniciada
-2025-11-03 00:09:05,117 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
-2025-11-03 00:09:23,462 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
-2025-11-03 00:09:23,462 - __main__ - INFO - Modo cambiado a: registering
-2025-11-03 00:09:24,260 - __main__ - INFO - Captura 1 de 3 para registro - Template size: 764 bytes
-2025-11-03 00:09:24,260 - __main__ - INFO - Progreso: 1/3 capturas
-2025-11-03 00:09:26,083 - __main__ - INFO - Captura 2 de 3 para registro - Template size: 814 bytes
-2025-11-03 00:09:26,084 - __main__ - INFO - Progreso: 2/3 capturas
-2025-11-03 00:09:27,667 - __main__ - INFO - Captura 3 de 3 para registro - Template size: 836 bytes
-2025-11-03 00:09:27,667 - __main__ - INFO - 3 CAPTURAS COMPLETADAS - Generando plantilla final...
-2025-11-03 00:09:27,667 - __main__ - INFO - Intento 1 de 2 para generar plantilla final
-2025-11-03 00:09:27,669 - __main__ - INFO - Resultado de GenRegTemplate: -7
-2025-11-03 00:09:27,670 - __main__ - ERROR - Error al generar plantilla (intento 1): Handle inválido
-2025-11-03 00:09:27,670 - __main__ - WARNING - Error de handle inválido - intentando reconexión
-2025-11-03 00:09:27,670 - __main__ - WARNING - Intentando reconexión automática del dispositivo...
-2025-11-03 00:09:27,670 - __main__ - INFO - Deteniendo captura...
-2025-11-03 00:09:30,701 - __main__ - WARNING - El hilo de captura no terminó en el tiempo esperado
-2025-11-03 00:09:30,701 - __main__ - INFO - Captura detenida
-2025-11-03 00:09:31,704 - __main__ - INFO - Dispositivo anterior cerrado
-2025-11-03 00:09:31,704 - __main__ - INFO - SDK terminado
-2025-11-03 00:09:33,708 - __main__ - INFO - Reinicializando SDK...
-2025-11-03 00:22:07,540 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
-2025-11-03 00:22:07,540 - __main__ - INFO - Ejecutando en modo 64-bit
-2025-11-03 00:22:07,563 - __main__ - INFO - DLL cargada exitosamente
-2025-11-03 00:22:07,564 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
-2025-11-03 00:22:07,568 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
-2025-11-03 00:22:26,991 - __main__ - INFO - Solicitud: Inicializar dispositivo
-2025-11-03 00:22:26,992 - __main__ - INFO - Inicializando dispositivo...
-2025-11-03 00:22:27,175 - __main__ - INFO - Código de retorno de Init: 0
-2025-11-03 00:22:27,176 - __main__ - INFO - Dispositivos detectados: 1
-2025-11-03 00:22:29,661 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
-2025-11-03 00:22:29,662 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
-2025-11-03 00:22:30,969 - __main__ - INFO - Handle obtenido: 3049864630576
-2025-11-03 00:22:30,970 - __main__ - INFO - Dispositivo abierto correctamente
-2025-11-03 00:22:30,973 - __main__ - INFO - Dimensiones de imagen: 284x363
-2025-11-03 00:22:30,975 - __main__ - INFO - Loop de captura iniciado
-2025-11-03 00:22:30,975 - __main__ - INFO - Captura iniciada
-2025-11-03 00:22:30,976 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
-2025-11-03 00:22:44,302 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
-2025-11-03 00:22:44,303 - __main__ - INFO - Modo cambiado a: registering
-2025-11-03 00:22:44,914 - __main__ - INFO - Captura 1 de 3 para registro - Template size: 792 bytes
-2025-11-03 00:22:44,915 - __main__ - INFO - ⏳ Progreso: 1/3 capturas
-2025-11-03 00:22:46,848 - __main__ - INFO - Captura 2 de 3 para registro - Template size: 728 bytes
-2025-11-03 00:22:46,849 - __main__ - INFO - ⏳ Progreso: 2/3 capturas
-2025-11-03 00:22:48,131 - __main__ - INFO - Captura 3 de 3 para registro - Template size: 872 bytes
-2025-11-03 00:22:48,132 - __main__ - INFO - 🎯 3 CAPTURAS COMPLETADAS - Preparando generación de plantilla final...
-2025-11-03 00:22:48,132 - __main__ - INFO - ⏳ Pausa de 2 segundos para estabilizar dispositivo...
-2025-11-03 00:22:50,134 - __main__ - INFO - 🔄 Intento 1 de 3 - Estrategia: normal
-2025-11-03 00:22:50,134 - __main__ - INFO - ✅ Plantillas validadas - tamaños: [792, 728, 872]
-2025-11-03 00:22:50,135 - __main__ - INFO - 🔧 Creando buffers para plantillas...
-2025-11-03 00:22:51,139 - __main__ - INFO - 🎯 Llamando ZKFPM_GenRegTemplate...
-2025-11-03 00:22:51,140 - __main__ - INFO - 📊 Resultado de GenRegTemplate: -7 (Handle inválido)
-2025-11-03 00:22:51,141 - __main__ - ERROR - ❌ Error al generar plantilla (intento 1): Handle inválido
-2025-11-03 00:22:51,141 - __main__ - WARNING - 🔧 Error de handle inválido - intentando recuperación...
-2025-11-03 00:22:51,142 - __main__ - WARNING - 🔄 Intentando reconexión automática del dispositivo...
-2025-11-03 00:22:56,167 - __main__ - WARNING - ⚠️ El hilo de captura no terminó en el tiempo esperado, continuando...
-2025-11-03 00:22:56,168 - __main__ - INFO - 🔒 Cerrando dispositivo...
-2025-11-03 00:22:56,173 - __main__ - INFO - ✅ Dispositivo cerrado correctamente
-2025-11-03 00:22:56,173 - __main__ - INFO - 🔒 Terminando SDK...
-2025-11-03 00:22:56,176 - __main__ - INFO - ✅ SDK terminado correctamente
-2025-11-03 00:22:56,177 - __main__ - INFO - ⏳ Esperando 3 segundos para reset del dispositivo...
-2025-11-03 00:22:59,180 - __main__ - INFO - 🔄 Reinicializando SDK...
+2025-11-03 09:20:24,559 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
+2025-11-03 09:20:24,559 - __main__ - INFO - Ejecutando en modo 64-bit
+2025-11-03 09:20:24,635 - __main__ - INFO - DLL cargada exitosamente
+2025-11-03 09:20:24,636 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
+2025-11-03 09:20:24,648 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
+2025-11-03 09:21:10,859 - __main__ - INFO - Solicitud: Inicializar dispositivo
+2025-11-03 09:21:10,860 - __main__ - INFO - Inicializando dispositivo...
+2025-11-03 09:21:11,036 - __main__ - INFO - Código de retorno de Init: 0
+2025-11-03 09:21:11,037 - __main__ - INFO - Dispositivos detectados: 1
+2025-11-03 09:21:13,383 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
+2025-11-03 09:21:13,384 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
+2025-11-03 09:21:14,687 - __main__ - INFO - Handle obtenido: 2456047064784
+2025-11-03 09:21:14,688 - __main__ - INFO - Dispositivo abierto correctamente
+2025-11-03 09:21:14,690 - __main__ - INFO - Dimensiones de imagen: 284x363
+2025-11-03 09:21:14,692 - __main__ - INFO - Loop de captura iniciado
+2025-11-03 09:21:14,693 - __main__ - INFO - Captura iniciada
+2025-11-03 09:21:14,693 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
+2025-11-03 09:21:32,801 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
+2025-11-03 09:21:32,902 - __main__ - ERROR - Error interno del servidor: 500 Internal Server Error: The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.
+2025-11-03 09:30:13,812 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
+2025-11-03 09:30:13,813 - __main__ - INFO - Ejecutando en modo 64-bit
+2025-11-03 09:30:13,824 - __main__ - INFO - DLL cargada exitosamente
+2025-11-03 09:30:13,825 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
+2025-11-03 09:30:13,828 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
+2025-11-03 09:30:29,554 - __main__ - INFO - Solicitud: Inicializar dispositivo
+2025-11-03 09:30:29,555 - __main__ - INFO - Inicializando dispositivo...
+2025-11-03 09:30:29,574 - __main__ - INFO - Código de retorno de Init: 0
+2025-11-03 09:30:29,575 - __main__ - INFO - Dispositivos detectados: 1
+2025-11-03 09:30:31,750 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
+2025-11-03 09:30:31,752 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
+2025-11-03 09:30:33,049 - __main__ - INFO - Handle obtenido: 2357318324528
+2025-11-03 09:30:33,050 - __main__ - INFO - Dispositivo abierto correctamente
+2025-11-03 09:30:33,051 - __main__ - INFO - Dimensiones de imagen: 284x363
+2025-11-03 09:30:33,052 - __main__ - INFO - Loop de captura iniciado
+2025-11-03 09:30:33,052 - __main__ - INFO - Captura iniciada
+2025-11-03 09:30:33,053 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
+2025-11-03 09:30:58,643 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
+2025-11-03 09:30:58,659 - __main__ - ERROR - Error interno del servidor: 500 Internal Server Error: The server encountered an internal error and was unable to complete your request. Either the server is overloaded or there is an error in the application.
+2025-11-03 10:09:58,061 - __main__ - INFO - === ZKTeco USB Bridge Service Iniciado ===
+2025-11-03 10:09:58,063 - __main__ - INFO - Ejecutando en modo 64-bit
+2025-11-03 10:09:58,117 - __main__ - INFO - DLL cargada exitosamente
+2025-11-03 10:09:58,117 - __main__ - INFO - SDK de ZKTeco cargado correctamente con prototipos seguros
+2025-11-03 10:09:58,129 - __main__ - INFO - Instancia de ZKTecoDevice creada correctamente
+2025-11-03 10:10:29,085 - __main__ - INFO - Solicitud: Inicializar dispositivo
+2025-11-03 10:10:29,085 - __main__ - INFO - Inicializando dispositivo...
+2025-11-03 10:10:29,263 - __main__ - INFO - Código de retorno de Init: 0
+2025-11-03 10:10:29,264 - __main__ - INFO - Dispositivos detectados: 1
+2025-11-03 10:10:34,634 - __main__ - INFO - Solicitud: Abrir dispositivo (índice: 0)
+2025-11-03 10:10:34,635 - __main__ - INFO - Intentando abrir dispositivo con índice 0...
+2025-11-03 10:10:35,934 - __main__ - INFO - Handle obtenido: 2129136260816
+2025-11-03 10:10:35,935 - __main__ - INFO - Dispositivo abierto correctamente
+2025-11-03 10:10:35,935 - __main__ - INFO - Dimensiones de imagen: 284x363
+2025-11-03 10:10:35,936 - __main__ - INFO - Loop de captura iniciado
+2025-11-03 10:10:35,936 - __main__ - INFO - Captura iniciada
+2025-11-03 10:10:35,937 - __main__ - INFO - Buffers creados: imagen=103092, template=2048
+2025-11-03 10:10:46,266 - __main__ - INFO - Solicitud: Cambiar modo a 'registering'
+2025-11-03 10:10:46,267 - __main__ - INFO - Modo cambiado a: registering
+2025-11-03 10:10:46,756 - __main__ - INFO - ✅ Captura 1/3 completada - Tamaño: 1038 bytes
+2025-11-03 10:10:46,756 - __main__ - INFO - ⏳ Progreso: 1/3 capturas
+2025-11-03 10:10:48,890 - __main__ - INFO - ✅ Captura 2/3 completada - Tamaño: 740 bytes
+2025-11-03 10:10:48,891 - __main__ - INFO - ⏳ Progreso: 2/3 capturas
+2025-11-03 10:10:50,291 - __main__ - INFO - ✅ Captura 3/3 completada - Tamaño: 936 bytes
+2025-11-03 10:10:50,291 - __main__ - INFO - 🎯 3 CAPTURAS COMPLETADAS - Preparando generación de plantilla final...
+2025-11-03 10:10:50,293 - __main__ - INFO - ⏳ Pausa de 2 segundos para estabilizar dispositivo...
+2025-11-03 10:10:52,298 - __main__ - INFO - ✅ Plantillas validadas - tamaños: [1038, 740, 936]
+2025-11-03 10:10:52,299 - __main__ - INFO - 🔄 Intento 1 de 3 - Estrategia: normal
+2025-11-03 10:10:52,300 - __main__ - INFO - 🔧 Creando buffers para plantillas...
+2025-11-03 10:10:52,302 - __main__ - INFO - 🎯 Llamando ZKFPM_GenRegTemplate...
+2025-11-03 10:10:52,303 - __main__ - INFO - 📊 Resultado de GenRegTemplate: -7 (Handle inválido)
+2025-11-03 10:10:52,304 - __main__ - ERROR - ❌ Error al generar plantilla (intento 1): Handle inválido
+2025-11-03 10:10:52,305 - __main__ - WARNING - 🔧 Error de handle inválido - intentando recuperación...
+2025-11-03 10:10:52,306 - __main__ - WARNING - 🔄 Intentando reconexión automática del dispositivo...
+2025-11-03 10:10:57,334 - __main__ - WARNING - ⚠️ El hilo de captura no terminó en el tiempo esperado, continuando...
+2025-11-03 10:10:57,335 - __main__ - INFO - 🔒 Cerrando dispositivo...
+2025-11-03 10:10:57,336 - __main__ - INFO - ✅ Dispositivo cerrado correctamente
+2025-11-03 10:10:57,337 - __main__ - INFO - 🔒 Terminando SDK...
+2025-11-03 10:10:57,338 - __main__ - INFO - ✅ SDK terminado correctamente
+2025-11-03 10:10:57,338 - __main__ - INFO - ⏳ Esperando 3 segundos para reset del dispositivo...
+2025-11-03 10:11:00,340 - __main__ - INFO - 🔄 Reinicializando SDK...

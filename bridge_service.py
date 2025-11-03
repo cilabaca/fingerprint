@@ -201,7 +201,8 @@ class ZKTecoDevice:
         self.is_initialized = False
         self._lock = threading.Lock()
         logger.info("Instancia de ZKTecoDevice creada correctamente")
-    
+
+    # Métodos privados (con _)
     def _get_error_message(self, error_code):
         """Convertir código de error a mensaje legible"""
         error_messages = {
@@ -338,6 +339,364 @@ class ZKTecoDevice:
             logger.error(f"❌ Error durante reconexión: {e}")
             return False
 
+    def _capture_loop(self):
+        """Loop de captura en segundo plano - VERSIÓN MEJORADA SIN DEADLOCK"""
+        logger.info("Loop de captura iniciado")
+        
+        if not SDK_AVAILABLE:
+            logger.error("SDK no disponible")
+            self.is_capturing = False
+            return
+        
+        # Verificación inicial de conexión
+        if not self.device_handle or not self._verify_device_connection():
+            logger.error("Dispositivo no conectado o no responde al iniciar captura")
+            self.is_capturing = False
+            return
+        
+        # Crear buffers
+        try:
+            image_buffer_size = self.width * self.height
+            image_buffer = (ctypes.c_ubyte * image_buffer_size)()
+            template_buffer = (ctypes.c_ubyte * 2048)()
+            template_size = ctypes.c_int(2048)
+            
+            logger.info(f"Buffers creados: imagen={image_buffer_size}, template=2048")
+        except Exception as e:
+            logger.error(f"Error al crear buffers: {e}")
+            self.is_capturing = False
+            return
+        
+        consecutive_errors = 0
+        max_consecutive_errors = 5
+        connection_check_interval = 10
+        capture_count = 0
+        
+        try:
+            while self.is_capturing:
+                try:
+                    # Verificación periódica de conexión
+                    capture_count += 1
+                    if capture_count >= connection_check_interval:
+                        capture_count = 0
+                        if not self._verify_device_connection():
+                            logger.warning("Dispositivo desconectado durante captura - intentando reconexión")
+                            if self._reconnect_device():
+                                logger.info("Reconexión exitosa - continuando captura")
+                                # Recrear buffers después de reconexión
+                                try:
+                                    image_buffer_size = self.width * self.height
+                                    image_buffer = (ctypes.c_ubyte * image_buffer_size)()
+                                    template_buffer = (ctypes.c_ubyte * 2048)()
+                                    template_size = ctypes.c_int(2048)
+                                except Exception as e:
+                                    logger.error(f"Error al recrear buffers: {e}")
+                                    break
+                            else:
+                                logger.error("No se pudo reconectar - deteniendo captura")
+                                break
+                    
+                    # Verificar si debemos continuar
+                    if not self.is_capturing:
+                        break
+                        
+                    if not self.device_handle:
+                        logger.error("Handle perdido durante captura")
+                        break
+                    
+                    template_size.value = 2048
+                    
+                    # Capturar huella
+                    ret = zkfp.ZKFPM_AcquireFingerprint(
+                        self.device_handle,
+                        image_buffer,
+                        image_buffer_size,
+                        template_buffer,
+                        ctypes.byref(template_size)
+                    )
+                    
+                    if ret == ZKFP_ERR_OK:
+                        consecutive_errors = 0
+                        
+                        try:
+                            # Convertir a bytes
+                            template_bytes = bytes(template_buffer[:template_size.value])
+                            image_bytes = bytes(image_buffer[:image_buffer_size])
+                            
+                            # Convertir a base64
+                            template_b64 = base64.b64encode(template_bytes).decode('utf-8')
+                            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                            
+                            # Actualizar última captura
+                            self.last_capture = {
+                                'template': template_b64,
+                                'image': image_b64,
+                                'timestamp': time.time(),
+                                'width': self.width,
+                                'height': self.height,
+                                'template_size': template_size.value
+                            }
+                            
+                            # Procesar según el modo
+                            if self.current_mode == "registering":
+                                self._process_registration(template_bytes)
+                            elif self.current_mode == "verifying":
+                                self._process_verification(template_bytes)
+                            
+                        except Exception as e:
+                            logger.error(f"Error al procesar captura: {e}")
+                        
+                    elif ret == ZKFP_ERR_CAPTURE:
+                        # Error normal, esperando dedo
+                        consecutive_errors = 0
+                        pass
+                    else:
+                        consecutive_errors += 1
+                        error_msg = self._get_error_message(ret)
+                        
+                        if consecutive_errors == 1:
+                            logger.warning(f"Error en captura: {error_msg} (código: {ret})")
+                        
+                        if consecutive_errors >= max_consecutive_errors:
+                            logger.error(f"Demasiados errores consecutivos ({consecutive_errors}), verificando conexión")
+                            
+                            # Verificar si el problema es de conexión
+                            if not self._verify_device_connection():
+                                logger.warning("Problema de conexión detectado - intentando reconexión")
+                                if self._reconnect_device():
+                                    consecutive_errors = 0
+                                    continue
+                            
+                            logger.error("No se pudo resolver el problema - deteniendo captura")
+                            break
+                    
+                    time.sleep(0.1)
+                    
+                except Exception as e:
+                    consecutive_errors += 1
+                    logger.error(f"Excepción en captura: {e}")
+                    
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error("Demasiadas excepciones, deteniendo captura")
+                        break
+                    
+                    time.sleep(0.5)
+        
+        except Exception as e:
+            logger.error(f"Excepción crítica en loop de captura: {e}")
+        
+        finally:
+            # Asegurarse de que el flag esté desactivado
+            self.is_capturing = False
+            logger.info("Loop de captura finalizado")
+
+    def _process_registration(self, template):
+        """Procesar registro de huella con manejo robusto de errores"""
+        try:
+            if self.current_mode != "registering":
+                return
+            
+            # Verificar conexión antes de procesar
+            if not self._verify_device_connection():
+                logger.error("❌ Dispositivo desconectado al procesar registro")
+                if self._reconnect_device():
+                    logger.info("✅ Reconexión exitosa - continuando registro")
+                else:
+                    logger.error("❌ No se pudo reconectar - abortando registro")
+                    self._reset_registration_state()
+                    return
+            
+            # Evitar acumulación de plantillas
+            if self.register_count >= 3:
+                logger.warning("⚠️ Ya se tienen 3 plantillas, ignorando captura adicional")
+                return
+            
+            # Agregar plantilla
+            self.register_templates.append(template)
+            self.register_count = len(self.register_templates)
+            
+            logger.info(f"✅ Captura {self.register_count}/3 completada - Tamaño: {len(template)} bytes")
+            
+            # Actualizar información de progreso
+            if self.last_capture:
+                self.last_capture['register_count'] = self.register_count
+                self.last_capture['registration_in_progress'] = True
+            
+            # Si tenemos 3 capturas, generar plantilla final
+            if self.register_count >= 3:
+                logger.info("🎯 3 CAPTURAS COMPLETADAS - Preparando generación de plantilla final...")
+                logger.info("⏳ Pausa de 2 segundos para estabilizar dispositivo...")
+                time.sleep(2)
+                
+                # Verificar conexión antes de generar
+                if not self._verify_device_connection():
+                    logger.error("❌ Dispositivo desconectado antes de generar plantilla")
+                    if not self._reconnect_device():
+                        logger.error("❌ No se pudo reconectar - reiniciando registro")
+                        self._reset_registration_state()
+                        return
+                
+                # Generar plantilla final
+                success = self._generate_final_template_robust()
+                
+                if success:
+                    logger.info("✅ REGISTRO COMPLETADO EXITOSAMENTE")
+                else:
+                    logger.error("❌ No se pudo generar plantilla final")
+                    # Mantener 2 plantillas para reintentar
+                    if len(self.register_templates) >= 2:
+                        self.register_count = 2
+                        self.register_templates = self.register_templates[:2]
+                        if self.last_capture:
+                            self.last_capture['register_count'] = 2
+                            self.last_capture['registration_error'] = "Error al generar plantilla final"
+            else:
+                logger.info(f"⏳ Progreso: {self.register_count}/3 capturas")
+                        
+        except Exception as e:
+            logger.exception(f"❌ ERROR CRÍTICO en _process_registration: {e}")
+            self._reset_registration_state()
+
+    def _generate_final_template_robust(self):
+        """Genera plantilla final con reintentos y manejo robusto de errores"""
+        try:
+            if not self._validate_templates():
+                logger.error("❌ Validación de plantillas falló")
+                return False
+            
+            max_attempts = 3
+            
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    logger.info(f"🔄 Intento {attempt} de {max_attempts} - Estrategia: normal")
+                    
+                    # Verificar handle válido
+                    if not self.device_handle or self.device_handle <= 0:
+                        logger.error("❌ Handle inválido detectado")
+                        if not self._reconnect_device():
+                            continue
+                    
+                    # Crear buffers para las 3 plantillas
+                    logger.info("🔧 Creando buffers para plantillas...")
+                    template1 = (ctypes.c_ubyte * len(self.register_templates[0]))(*self.register_templates[0])
+                    template2 = (ctypes.c_ubyte * len(self.register_templates[1]))(*self.register_templates[1])
+                    template3 = (ctypes.c_ubyte * len(self.register_templates[2]))(*self.register_templates[2])
+                    
+                    # Buffer para plantilla final
+                    reg_temp_len = 2048
+                    reg_temp = (ctypes.c_ubyte * reg_temp_len)()
+                    reg_temp_size = ctypes.c_int(reg_temp_len)
+                    
+                    logger.info("🎯 Llamando ZKFPM_GenRegTemplate...")
+                    
+                    # Llamar a GenRegTemplate
+                    ret = zkfp.ZKFPM_GenRegTemplate(
+                        self.device_handle,
+                        template1,
+                        template2,
+                        template3,
+                        reg_temp,
+                        ctypes.byref(reg_temp_size)
+                    )
+                    
+                    logger.info(f"📊 Resultado de GenRegTemplate: {ret} ({self._get_error_message(ret)})")
+                    
+                    if ret == ZKFP_ERR_OK:
+                        final_size = reg_temp_size.value
+                        logger.info(f"✅ Plantilla final generada - Tamaño: {final_size} bytes")
+                        
+                        # Convertir a bytes y base64
+                        final_template = bytes(reg_temp[:final_size])
+                        final_template_b64 = base64.b64encode(final_template).decode('utf-8')
+                        
+                        # Actualizar last_capture con plantilla final
+                        if self.last_capture:
+                            self.last_capture['final_template'] = final_template_b64
+                            self.last_capture['registration_complete'] = True
+                            self.last_capture['final_template_size'] = final_size
+                            self.last_capture['registration_in_progress'] = False
+                        
+                        logger.info("✅ Plantilla final guardada en last_capture")
+                        return True
+                        
+                    elif ret == ZKFP_ERR_INVALID_HANDLE:
+                        logger.error(f"❌ Error al generar plantilla (intento {attempt}): Handle inválido")
+                        logger.warning("🔧 Error de handle inválido - intentando recuperación...")
+                        
+                        if self._reconnect_device():
+                            continue
+                        else:
+                            logger.error("❌ No se pudo recuperar el handle")
+                            
+                    else:
+                        error_msg = self._get_error_message(ret)
+                        logger.error(f"❌ Error al generar plantilla: {error_msg}")
+                        
+                        # Para errores no relacionados con handle, no reintentar
+                        if ret != ZKFP_ERR_MERGE:
+                            return False
+                        
+                except Exception as e:
+                    logger.exception(f"💥 Excepción en intento {attempt}: {e}")
+                    if attempt < max_attempts:
+                        time.sleep(2)
+                        continue
+            
+            logger.error("❌ Todos los intentos fallaron para generar plantilla")
+            return False
+            
+        except Exception as e:
+            logger.exception(f"❌ Error crítico en _generate_final_template_robust: {e}")
+            return False
+
+    def _validate_templates(self):
+        """Validar que las plantillas sean consistentes y válidas"""
+        try:
+            if len(self.register_templates) != 3:
+                logger.error(f"❌ Número incorrecto de plantillas: {len(self.register_templates)}")
+                return False
+            
+            # Verificar que ninguna plantilla esté vacía
+            for i, template in enumerate(self.register_templates):
+                if len(template) == 0:
+                    logger.error(f"❌ Plantilla {i+1} está vacía")
+                    return False
+                if len(template) < 100:  # Tamaño mínimo razonable
+                    logger.warning(f"⚠️ Plantilla {i+1} muy pequeña: {len(template)} bytes")
+            
+            # Verificar que las plantillas no sean idénticas (posible error)
+            if (self.register_templates[0] == self.register_templates[1] or 
+                self.register_templates[1] == self.register_templates[2] or
+                self.register_templates[0] == self.register_templates[2]):
+                logger.warning("⚠️ Algunas plantillas son idénticas - posible error de captura")
+            
+            logger.info(f"✅ Plantillas validadas - tamaños: {[len(t) for t in self.register_templates]}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error validando plantillas: {e}")
+            return False
+
+    def _process_verification(self, template):
+        """Marcar que hay una plantilla disponible para verificar"""
+        if self.last_capture:
+            self.last_capture['ready_for_verification'] = True
+    
+    def _reset_registration_state(self):
+        """Resetear estado de registro"""
+        with self._lock:
+            self.register_count = 0
+            self.register_templates = []
+            self.current_mode = "idle"
+            # Limpiar solo datos de registro del last_capture
+            if self.last_capture:
+                for field in ['registration_complete', 'final_template', 'register_count', 'registration_in_progress', 'registration_error']:
+                    if field in self.last_capture:
+                        del self.last_capture[field]
+            
+            logger.info("Estado de registro reseteado")
+
+    # Métodos públicos
     def initialize(self):
         """Inicializar el SDK y detectar dispositivos"""
         try:
@@ -395,7 +754,7 @@ class ZKTecoDevice:
                 'success': False,
                 'message': f'Excepción: {str(e)}'
             }
-    
+
     def open_device(self, index=0):
         """Abrir conexión con el dispositivo - VERSIÓN MEJORADA"""
         try:
@@ -549,7 +908,7 @@ class ZKTecoDevice:
                 'success': False,
                 'message': f'Error: {str(e)}'
             }
-    
+
     def start_capture(self):
         """Iniciar captura continua de huellas"""
         if not self.device_handle:
@@ -572,7 +931,7 @@ class ZKTecoDevice:
             'success': False,
             'message': 'Ya está capturando'
         }
-    
+
     def stop_capture(self):
         """Detener captura de forma segura sin deadlocks"""
         if not self.is_capturing:
@@ -603,396 +962,30 @@ class ZKTecoDevice:
             'success': True,
             'message': 'Captura detenida'
         }
-    
-    def _capture_loop(self):
-        """Loop de captura en segundo plano - VERSIÓN MEJORADA SIN DEADLOCK"""
-        logger.info("Loop de captura iniciado")
-        
-        if not SDK_AVAILABLE:
-            logger.error("SDK no disponible")
-            self.is_capturing = False
-            return
-        
-        # Verificación inicial de conexión
-        if not self.device_handle or not self._verify_device_connection():
-            logger.error("Dispositivo no conectado o no responde al iniciar captura")
-            self.is_capturing = False
-            return
-        
-        # Crear buffers
-        try:
-            image_buffer_size = self.width * self.height
-            image_buffer = (ctypes.c_ubyte * image_buffer_size)()
-            template_buffer = (ctypes.c_ubyte * 2048)()
-            template_size = ctypes.c_int(2048)
-            
-            logger.info(f"Buffers creados: imagen={image_buffer_size}, template=2048")
-        except Exception as e:
-            logger.error(f"Error al crear buffers: {e}")
-            self.is_capturing = False
-            return
-        
-        consecutive_errors = 0
-        max_consecutive_errors = 5
-        connection_check_interval = 10
-        capture_count = 0
-        
-        try:
-            while self.is_capturing:
-                try:
-                    # Verificación periódica de conexión
-                    capture_count += 1
-                    if capture_count >= connection_check_interval:
-                        capture_count = 0
-                        if not self._verify_device_connection():
-                            logger.warning("Dispositivo desconectado durante captura - intentando reconexión")
-                            if self._reconnect_device():
-                                logger.info("Reconexión exitosa - continuando captura")
-                                # Recrear buffers después de reconexión
-                                try:
-                                    image_buffer_size = self.width * self.height
-                                    image_buffer = (ctypes.c_ubyte * image_buffer_size)()
-                                    template_buffer = (ctypes.c_ubyte * 2048)()
-                                    template_size = ctypes.c_int(2048)
-                                except Exception as e:
-                                    logger.error(f"Error al recrear buffers: {e}")
-                                    break
-                            else:
-                                logger.error("No se pudo reconectar - deteniendo captura")
-                                break
-                    
-                    # Verificar si debemos continuar
-                    if not self.is_capturing:
-                        break
-                        
-                    if not self.device_handle:
-                        logger.error("Handle perdido durante captura")
-                        break
-                    
-                    template_size.value = 2048
-                    
-                    # Capturar huella
-                    ret = zkfp.ZKFPM_AcquireFingerprint(
-                        self.device_handle,
-                        image_buffer,
-                        image_buffer_size,
-                        template_buffer,
-                        ctypes.byref(template_size)
-                    )
-                    
-                    if ret == ZKFP_ERR_OK:
-                        consecutive_errors = 0
-                        
-                        try:
-                            # Convertir a bytes
-                            template_bytes = bytes(template_buffer[:template_size.value])
-                            image_bytes = bytes(image_buffer[:image_buffer_size])
-                            
-                            # Convertir a base64
-                            template_b64 = base64.b64encode(template_bytes).decode('utf-8')
-                            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-                            
-                            # Actualizar última captura
-                            self.last_capture = {
-                                'template': template_b64,
-                                'image': image_b64,
-                                'timestamp': time.time(),
-                                'width': self.width,
-                                'height': self.height,
-                                'template_size': template_size.value
-                            }
-                            
-                            # Procesar según el modo
-                            if self.current_mode == "registering":
-                                self._process_registration(template_bytes)
-                            elif self.current_mode == "verifying":
-                                self._process_verification(template_bytes)
-                            
-                        except Exception as e:
-                            logger.error(f"Error al procesar captura: {e}")
-                        
-                    elif ret == ZKFP_ERR_CAPTURE:
-                        # Error normal, esperando dedo
-                        consecutive_errors = 0
-                        pass
-                    else:
-                        consecutive_errors += 1
-                        error_msg = self._get_error_message(ret)
-                        
-                        if consecutive_errors == 1:
-                            logger.warning(f"Error en captura: {error_msg} (código: {ret})")
-                        
-                        if consecutive_errors >= max_consecutive_errors:
-                            logger.error(f"Demasiados errores consecutivos ({consecutive_errors}), verificando conexión")
-                            
-                            # Verificar si el problema es de conexión
-                            if not self._verify_device_connection():
-                                logger.warning("Problema de conexión detectado - intentando reconexión")
-                                if self._reconnect_device():
-                                    consecutive_errors = 0
-                                    continue
-                            
-                            logger.error("No se pudo resolver el problema - deteniendo captura")
-                            break
-                    
-                    time.sleep(0.1)
-                    
-                except Exception as e:
-                    consecutive_errors += 1
-                    logger.error(f"Excepción en captura: {e}")
-                    
-                    if consecutive_errors >= max_consecutive_errors:
-                        logger.error("Demasiadas excepciones, deteniendo captura")
-                        break
-                    
-                    time.sleep(0.5)
-        
-        except Exception as e:
-            logger.error(f"Excepción crítica en loop de captura: {e}")
-        
-        finally:
-            # Asegurarse de que el flag esté desactivado
-            self.is_capturing = False
-            logger.info("Loop de captura finalizado")
-    
-    def _process_registration(self, template):
-        """Procesar registro de huella con manejo robusto de errores - VERSIÓN PROFESIONAL"""
-        try:
-            # Verificar que estamos en modo registro
-            if self.current_mode != "registering":
-                return
-            
-            # ✅ MEJORA: Verificar conexión ANTES de cualquier operación
-            if not self._verify_device_connection():
-                logger.error("Dispositivo desconectado al inicio de procesamiento de registro")
-                if self._reconnect_device():
-                    logger.info("Reconexión exitosa - continuando registro")
-                else:
-                    logger.error("No se pudo reconectar - abortando registro")
-                    self._reset_registration_state()
-                    return
-            
-            # ✅ MEJORA: Verificar que no tengamos ya 3 plantillas (evitar acumulación)
-            if self.register_count >= 3:
-                logger.warning("Ya se tienen 3 plantillas, ignorando captura adicional")
-                return
-            
-            # Agregar plantilla y actualizar contador
-            self.register_templates.append(template)
-            self.register_count = len(self.register_templates)
-            
-            logger.info(f"Captura {self.register_count} de 3 para registro - Template size: {len(template)} bytes")
-            
-            # Actualizar last_capture con información de progreso
-            if self.last_capture:
-                self.last_capture['register_count'] = self.register_count
-                self.last_capture['registration_in_progress'] = True
-            
-            # Verificar si tenemos 3 capturas
-            if self.register_count >= 3:
-                logger.info("🎯 3 CAPTURAS COMPLETADAS - Preparando generación de plantilla final...")
-                
-                # ✅ MEJORA CRÍTICA: Pausa estratégica antes de operación intensiva
-                logger.info("⏳ Pausa de 2 segundos para estabilizar dispositivo...")
-                time.sleep(2)
-                
-                # Verificación EXTRA de conexión antes de generar plantilla
-                if not self._verify_device_connection():
-                    logger.error("❌ Dispositivo desconectado justo antes de generar plantilla")
-                    if not self._reconnect_device():
-                        logger.error("No se pudo reconectar - reiniciando registro")
-                        self._reset_registration_state()
-                        return
-                
-                # Verificar que tenemos 3 plantillas válidas
-                if len(self.register_templates) < 3:
-                    logger.error(f"❌ Plantillas insuficientes: {len(self.register_templates)}/3")
-                    return
-                
-                # ✅ MEJORA: INTENTAR GENERAR PLANTILLA CON MÉTODO MÁS ROBUSTO
-                success = self._generate_final_template_with_retry()
-                
-                if success:
-                    logger.info("✅ REGISTRO COMPLETADO EXITOSAMENTE")
-                else:
-                    logger.error("❌ No se pudo generar la plantilla final después de todos los intentos")
-                    # Mantener estado para reintentar
-                    if len(self.register_templates) >= 2:
-                        self.register_count = 2
-                        self.register_templates = self.register_templates[:2]
-                        if self.last_capture:
-                            self.last_capture['register_count'] = 2
-                            self.last_capture['registration_error'] = "Error al generar plantilla final"
-                            
-            else:
-                # Menos de 3 capturas - continuar
-                logger.info(f"⏳ Progreso: {self.register_count}/3 capturas")
-                        
-        except Exception as e:
-            logger.error(f"❌ ERROR CRÍTICO EN _process_registration: {e}", exc_info=True)
-            self._reset_registration_state()
 
-    def _generate_final_template_with_retry(self):
-        """Generar plantilla final con método robusto y múltiples estrategias"""
-        max_retries = 3
-        strategies = ['normal', 'delayed', 'reconnect_first']
+    def set_mode(self, mode):
+        """Establecer modo de operación"""
+        valid_modes = ['idle', 'registering', 'verifying']
         
-        for attempt in range(max_retries):
-            strategy = strategies[attempt] if attempt < len(strategies) else 'normal'
-            
-            try:
-                logger.info(f"🔄 Intento {attempt + 1} de {max_retries} - Estrategia: {strategy}")
-                
-                # ✅ MEJORA: Estrategias diferentes según el intento
-                if strategy == 'delayed':
-                    logger.info("⏳ Aplicando estrategia de delay largo (3 segundos)...")
-                    time.sleep(3)
-                elif strategy == 'reconnect_first':
-                    logger.info("🔄 Aplicando estrategia de reconexión preventiva...")
-                    if not self._reconnect_device():
-                        logger.warning("No se pudo reconectar preventivamente, continuando...")
-                
-                # Verificar conexión en cada intento
-                if not self._verify_device_connection():
-                    logger.warning(f"⚠️ Dispositivo desconectado en intento {attempt + 1}")
-                    if not self._reconnect_device():
-                        logger.error(f"❌ No se pudo reconectar en intento {attempt + 1}")
-                        continue
-                
-                # ✅ MEJORA: Verificar que las plantillas sean válidas
-                valid_templates = self._validate_templates()
-                if not valid_templates:
-                    logger.error("❌ Plantillas inválidas detectadas")
-                    continue
-                
-                # Crear buffers para las 3 plantillas
-                logger.info("🔧 Creando buffers para plantillas...")
-                temp1 = (ctypes.c_ubyte * len(self.register_templates[0]))(*self.register_templates[0])
-                temp2 = (ctypes.c_ubyte * len(self.register_templates[1]))(*self.register_templates[1])
-                temp3 = (ctypes.c_ubyte * len(self.register_templates[2]))(*self.register_templates[2])
-                final_template = (ctypes.c_ubyte * 2048)()
-                template_size = ctypes.c_int(2048)
-                
-                # ✅ MEJORA: Pausa adicional antes de la llamada crítica
-                time.sleep(1)
-                
-                logger.info("🎯 Llamando ZKFPM_GenRegTemplate...")
-                
-                # Llamada al SDK para generar plantilla final
-                ret = zkfp.ZKFPM_GenRegTemplate(
-                    self.device_handle,
-                    temp1,
-                    temp2,
-                    temp3,
-                    final_template,
-                    ctypes.byref(template_size)
-                )
-                
-                logger.info(f"📊 Resultado de GenRegTemplate: {ret} ({self._get_error_message(ret)})")
-                
-                if ret == ZKFP_ERR_OK:
-                    # ✅ ÉXITO - Generar plantilla final
-                    final_bytes = bytes(final_template[:template_size.value])
-                    
-                    # ✅ MEJORA: Validar que la plantilla final no esté vacía
-                    if len(final_bytes) == 0:
-                        logger.error("❌ Plantilla final generada está vacía")
-                        continue
-                    
-                    template_b64 = base64.b64encode(final_bytes).decode('utf-8')
-                    
-                    logger.info(f"✅ PLANTILLA FINAL GENERADA - Tamaño: {template_size.value} bytes, Base64: {len(template_b64)} chars")
-                    
-                    if self.last_capture:
-                        self.last_capture['final_template'] = template_b64
-                        self.last_capture['registration_complete'] = True
-                        self.last_capture['registration_timestamp'] = time.time()
-                    
-                    # ✅ CORRECCIÓN CRÍTICA: Resetear estado inmediatamente después del éxito
-                    self._reset_registration_state()
-                    return True
-                    
-                else:
-                    error_msg = self._get_error_message(ret)
-                    logger.error(f"❌ Error al generar plantilla (intento {attempt + 1}): {error_msg}")
-                    
-                    # ✅ MEJORA: Manejo específico de errores
-                    if ret == ZKFP_ERR_INVALID_HANDLE:
-                        logger.warning("🔧 Error de handle inválido - intentando recuperación...")
-                        if not self._reconnect_device():
-                            logger.error("❌ No se pudo recuperar el handle")
-                            continue
-                    elif ret == ZKFP_ERR_MERGE:
-                        logger.error("❌ Error de combinación - las plantillas pueden ser incompatibles")
-                        # En este caso, no tiene sentido reintentar con las mismas plantillas
-                        break
-                    elif ret == ZKFP_ERR_MEMORY_NOT_ENOUGH:
-                        logger.error("❌ Memoria insuficiente - liberando recursos...")
-                        # Limpiar buffers y reintentar
-                        del temp1, temp2, temp3, final_template
-                        continue
-                    
-            except Exception as gen_error:
-                logger.error(f"❌ Excepción al generar plantilla (intento {attempt + 1}): {gen_error}")
-                
-                # ✅ MEJORA: Limpiar recursos en caso de excepción
-                try:
-                    del temp1, temp2, temp3, final_template
-                except:
-                    pass
-                
-                if attempt == max_retries - 1:
-                    logger.error("❌ Todos los intentos fallaron debido a excepciones")
+        if mode not in valid_modes:
+            return {
+                'success': False,
+                'message': f'Modo inválido. Opciones: {", ".join(valid_modes)}'
+            }
         
-        return False
-
-    def _validate_templates(self):
-        """Validar que las plantillas sean consistentes y válidas"""
-        try:
-            if len(self.register_templates) != 3:
-                logger.error(f"❌ Número incorrecto de plantillas: {len(self.register_templates)}")
-                return False
-            
-            # Verificar que ninguna plantilla esté vacía
-            for i, template in enumerate(self.register_templates):
-                if len(template) == 0:
-                    logger.error(f"❌ Plantilla {i+1} está vacía")
-                    return False
-                if len(template) < 100:  # Tamaño mínimo razonable
-                    logger.warning(f"⚠️ Plantilla {i+1} muy pequeña: {len(template)} bytes")
-            
-            # Verificar que las plantillas no sean idénticas (posible error)
-            if (self.register_templates[0] == self.register_templates[1] or 
-                self.register_templates[1] == self.register_templates[2] or
-                self.register_templates[0] == self.register_templates[2]):
-                logger.warning("⚠️ Algunas plantillas son idénticas - posible error de captura")
-            
-            logger.info(f"✅ Plantillas validadas - tamaños: {[len(t) for t in self.register_templates]}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ Error validando plantillas: {e}")
-            return False
-
-    def _process_verification(self, template):
-        """Marcar que hay una plantilla disponible para verificar"""
-        if self.last_capture:
-            self.last_capture['ready_for_verification'] = True
-    
-    def _reset_registration_state(self):
-        """Resetear estado de registro"""
-        with self._lock:
+        self.current_mode = mode
+        logger.info(f"Modo cambiado a: {mode}")
+        
+        if mode == "registering":
             self.register_count = 0
             self.register_templates = []
-            self.current_mode = "idle"
-            # Limpiar solo datos de registro del last_capture
-            if self.last_capture:
-                for field in ['registration_complete', 'final_template', 'register_count', 'registration_in_progress', 'registration_error']:
-                    if field in self.last_capture:
-                        del self.last_capture[field]
-            
-            logger.info("Estado de registro reseteado")
-    
+        
+        return {
+            'success': True,
+            'mode': mode,
+            'message': f'Modo establecido a: {mode}'
+        }
+
     def get_last_capture(self):
         """Obtener última captura de forma segura"""
         try:
@@ -1016,16 +1009,6 @@ class ZKTecoDevice:
             return {
                 'success': False,
                 'message': f'Error al obtener captura: {str(e)}'
-            }
-    
-    def set_mode(self, mode):
-        """Establecer modo de operación"""
-        valid_modes = ['idle', 'registering', 'verifying']
-        
-        if mode not in valid_modes:
-            return {
-                'success': False,
-                'message': f'Modo inválido. Opciones: {", ".join(valid_modes)}'
             }
         
         self.current_mode = mode
@@ -1166,6 +1149,61 @@ class ZKTecoDevice:
             return {
                 'success': False,
                 'message': f'Error al resetear: {str(e)}'
+            }
+
+    def save_fingerprint_to_database(self, employee_id, finger_index, template_b64):
+        """Guarda la plantilla de huella en la base de datos"""
+        try:
+            logger.info(f"💾 Guardando huella en BD - Empleado: {employee_id}, Dedo: {finger_index}")
+            
+            import mysql.connector
+            
+            # Configurar conexión (AJUSTAR CREDENCIALES)
+            conn = mysql.connector.connect(
+                host='localhost',
+                user='root',
+                password='',  # Ajustar tu contraseña
+                database='fingerprint_db'  # Ajustar nombre de tu BD
+            )
+            
+            cursor = conn.cursor()
+            
+            # Decodificar template
+            template_bytes = base64.b64decode(template_b64)
+            template_hex = template_bytes.hex()
+            
+            # Query con UPDATE si ya existe
+            query = """
+                INSERT INTO fingerprints 
+                (employee_id, finger_index, template, template_size, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                template = VALUES(template),
+                template_size = VALUES(template_size),
+                updated_at = NOW()
+            """
+            
+            values = (employee_id, finger_index, template_hex, len(template_bytes))
+            
+            cursor.execute(query, values)
+            conn.commit()
+            
+            logger.info(f"✅ Huella guardada exitosamente - ID: {cursor.lastrowid}")
+            
+            cursor.close()
+            conn.close()
+            
+            return {
+                'success': True,
+                'message': 'Huella guardada exitosamente',
+                'record_id': cursor.lastrowid
+            }
+            
+        except Exception as e:
+            logger.exception(f"❌ Error guardando en BD: {e}")
+            return {
+                'success': False,
+                'message': f'Error al guardar: {str(e)}'
             }
 
 # ==================== INSTANCIA GLOBAL ====================
@@ -1315,6 +1353,36 @@ def reset_registration():
     """Resetear estado de registro"""
     logger.info("Solicitud: Resetear registro")
     result = device.reset_registration()
+    return jsonify(result)
+
+@app.route('/api/fingerprint/save', methods=['POST'])
+def save_fingerprint():
+    """Guardar plantilla final en base de datos"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({
+            'success': False,
+            'message': 'Datos no proporcionados'
+        }), 400
+    
+    employee_id = data.get('employee_id')
+    finger_index = data.get('finger_index', 0)
+    template = data.get('template')
+    
+    if not employee_id or not template:
+        return jsonify({
+            'success': False,
+            'message': 'employee_id y template son requeridos'
+        }), 400
+    
+    logger.info(f"Solicitud: Guardar huella - Empleado: {employee_id}, Dedo: {finger_index}")
+    result = device.save_fingerprint_to_database(employee_id, finger_index, template)
+    
+    # Si se guardó exitosamente, resetear el estado de registro
+    if result.get('success'):
+        device.reset_registration()
+    
     return jsonify(result)
 
 @app.errorhandler(404)
