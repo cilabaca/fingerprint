@@ -1,5 +1,5 @@
 """
-ZKTeco USB Bridge Service - Versión Final Completamente Corregida
+ZKTeco USB Bridge Service - Versión Final
 Servicio puente entre aplicación web y sensor biométrico ZKTeco ZK4500
 Versión: 4.0.0 - Manejo robusto de threads y reconexión automática
 """
@@ -14,6 +14,7 @@ import logging
 import sys
 import os
 from datetime import datetime
+import requests # <--- Nueva importación para comunicarnos con la API PHP
 
 # ==================== CONFIGURACIÓN DE LOGGING CORREGIDA ====================
 class UTF8StreamHandler(logging.StreamHandler):
@@ -142,6 +143,14 @@ try:
     ]
     zkfp.ZKFPM_DBMatch.restype = ctypes.c_int
     
+    # ZKFPM_DBInit (basado en C# SDK 5.3.10) 
+    zkfp.ZKFPM_DBInit.argtypes = []
+    zkfp.ZKFPM_DBInit.restype = ctypes.c_void_p
+
+    # ZKFPM_DBFree (basado en C# SDK 5.3.11) [cite: 209]
+    zkfp.ZKFPM_DBFree.argtypes = [ctypes.c_void_p]
+    zkfp.ZKFPM_DBFree.restype = ctypes.c_int
+
     # Constantes del SDK
     ZKFP_ERR_OK = 0
     ZKFP_ERR_INITLIB = -1
@@ -180,6 +189,11 @@ except Exception as e:
     logger.error(f"Error crítico al cargar SDK: {e}")
     logger.warning("El servicio funcionará en modo simulación")
 
+# ==================== CONFIGURACIÓN DE LA APLICACIÓN ====================
+# MODIFIQUE ESTA URL A SU ENTORNO REAL si la API no está en localhost
+PHP_API_URL = "http://localhost/fingerprint/api.php" 
+MATCH_THRESHOLD = 60 # Umbral de coincidencia (60 es un valor típico de ZKTeco)
+
 # ==================== CONFIGURACIÓN FLASK ====================
 app = Flask(__name__)
 CORS(app)
@@ -190,6 +204,7 @@ class ZKTecoDevice:
 
     def __init__(self):
         self.device_handle = None
+        self.db_handle = None        
         self.capture_thread = None
         self.is_capturing = False
         self.width = 300  # Valores por defecto
@@ -200,6 +215,7 @@ class ZKTecoDevice:
         self.current_mode = "idle"
         self.is_initialized = False
         self._lock = threading.Lock()
+        self.register_step = "CAPTURE" # Estado para la FSM de registro        
         logger.info("Instancia de ZKTecoDevice creada correctamente")
 
     # Métodos privados (con _)
@@ -257,37 +273,57 @@ class ZKTecoDevice:
             return False
     
     def _reconnect_device(self):
-        """Reconectar dispositivo automáticamente - VERSIÓN MEJORADA"""
+        """Reconectar dispositivo automáticamente - VERSIÓN MEJORADA Y CORREGIDA DEADLOCK"""
         try:
             logger.warning("🔄 Intentando reconexión automática del dispositivo...")
+
+            # ================== INICIO DE CORRECCIÓN DE DEADLOCK ==================
+            # Identificar si el hilo actual es el hilo de captura
+            current_thread_ident = threading.current_thread().ident
+            capture_thread_ident = self.capture_thread.ident if self.capture_thread else None
+            is_self_call = (current_thread_ident == capture_thread_ident)
             
+            if is_self_call:
+                logger.warning("🔧 _reconnect_device llamado por el hilo de captura (auto-reparación).")
+            # =================== FIN DE CORRECCIÓN DE DEADLOCK ===================
+
             # ✅ MEJORA: Detener captura de forma más gradual
-            self.is_capturing = False
+            # ✅ CORRECCIÓN: Solo setear a False si NO es una auto-llamada,
+            # de lo contrario el hilo se detendrá después de reconectar.
+            if not is_self_call:
+                self.is_capturing = False
             
             # Esperar a que el thread se detenga naturalmente
-            timeout = 5  # Aumentar timeout
-            start_time = time.time()
-            if self.capture_thread and self.capture_thread.is_alive():
-                while self.capture_thread.is_alive() and (time.time() - start_time) < timeout:
-                    time.sleep(0.2)
-                
-                if self.capture_thread.is_alive():
-                    logger.warning("⚠️ El hilo de captura no terminó en el tiempo esperado, continuando...")
+            # ✅ CORRECCIÓN DE DEADLOCK: NO esperar si somos el mismo hilo
+            if not is_self_call:
+                timeout = 5  # Aumentar timeout
+                start_time = time.time()
+                if self.capture_thread and self.capture_thread.is_alive():
+                    while self.capture_thread.is_alive() and (time.time() - start_time) < timeout:
+                        time.sleep(0.2)
+                    
+                    if self.capture_thread.is_alive():
+                        logger.warning("⚠️ El hilo de captura no terminó en el tiempo esperado, continuando...")
+            else:
+                logger.warning("🔧 Omitiendo espera de thread (auto-llamada).")
             
             with self._lock:
                 # ✅ MEJORA: Cerrar dispositivo de forma más segura
-                if self.device_handle and SDK_AVAILABLE:
+                # --- INICIO DE CORRECCIÓN ---
+                # Liberar DB Handle antes de Terminate
+                if self.db_handle and SDK_AVAILABLE:
                     try:
-                        logger.info("🔒 Cerrando dispositivo...")
-                        ret = zkfp.ZKFPM_CloseDevice(self.device_handle)
+                        logger.info("🔒 Liberando cache de algoritmos (db_handle)...")
+                        ret = zkfp.ZKFPM_DBFree(self.db_handle)
                         if ret == ZKFP_ERR_OK:
-                            logger.info("✅ Dispositivo cerrado correctamente")
+                            logger.info("✅ db_handle liberado correctamente")
                         else:
-                            logger.warning(f"⚠️ Código al cerrar dispositivo: {ret}")
+                            logger.warning(f"⚠️ Código al liberar db_handle: {ret}")
                     except Exception as e:
-                        logger.warning(f"⚠️ Error al cerrar handle: {e}")
+                        logger.warning(f"⚠️ Error al liberar db_handle: {e}")
                     finally:
-                        self.device_handle = None
+                        self.db_handle = None
+                # --- FIN DE CORRECCIÓN ---
                 
                 # ✅ MEJORA: Terminar SDK de forma controlada
                 if self.is_initialized and SDK_AVAILABLE:
@@ -323,12 +359,15 @@ class ZKTecoDevice:
                     # ✅ MEJORA: Pausa antes de reiniciar captura
                     time.sleep(2)
                     
-                    # Reiniciar captura después de reconexión exitosa
-                    capture_result = self.start_capture()
-                    if capture_result.get('success'):
-                        logger.info("✅ Captura reiniciada después de reconexión")
-                    else:
-                        logger.warning("⚠️ No se pudo reiniciar la captura después de reconexión")
+                    # ✅ CORRECCIÓN DE DEADLOCK:
+                    # NO reiniciar la captura si fue una auto-llamada,
+                    # ya que el hilo original (este mismo) debe continuar.
+                    if not is_self_call:
+                        capture_result = self.start_capture()
+                        if capture_result.get('success'):
+                            logger.info("✅ Captura reiniciada después de reconexión")
+                        else:
+                            logger.warning("⚠️ No se pudo reiniciar la captura después de reconexión")
                     
                     return True
                 else:
@@ -415,60 +454,121 @@ class ZKTecoDevice:
                         ctypes.byref(template_size)
                     )
                     
-                    if ret == ZKFP_ERR_OK:
-                        consecutive_errors = 0
+                    # =================== INICIO DE FSM DE REGISTRO ===================
+                    
+                    # Manejo de estado para MODO REGISTRO
+                    if self.current_mode == "registering":
                         
-                        try:
-                            # Convertir a bytes
-                            template_bytes = bytes(template_buffer[:template_size.value])
-                            image_bytes = bytes(image_buffer[:image_buffer_size])
+                        # --- ESTADO 1: ESPERANDO DEDO ---
+                        if self.register_step == "CAPTURE":
+                            if ret == ZKFP_ERR_OK:
+                                # ¡Tenemos una huella! Procesarla.
+                                consecutive_errors = 0
+                                
+                                template_bytes = bytes(template_buffer[:template_size.value])
+                                image_bytes = bytes(image_buffer[:image_buffer_size])
+                                
+                                self.last_capture = {
+                                    'template': base64.b64encode(template_bytes).decode('utf-8'),
+                                    'image': base64.b64encode(image_bytes).decode('utf-8'),
+                                    'timestamp': time.time(),
+                                    'width': self.width, 'height': self.height,
+                                    'template_size': template_size.value
+                                }
+                                
+                                # Procesar el registro (usando la función que ya teníamos)
+                                registration_complete = self._process_registration(template_bytes)
+                                
+                                if registration_complete:
+                                    logger.info("Registro completado, deteniendo loop de captura...")
+                                    self.is_capturing = False # Flag para detener
+                                    break # Salir del 'while'
+                                
+                                # Si no está completo, cambiar de estado
+                                self.register_step = "WAIT_FOR_LIFT"
+                                if self.last_capture:
+                                    self.last_capture['registration_error'] = "¡Bien! Ahora levante el dedo."
+                                logger.info(f"Captura {self.register_count}/3. Cambiando a estado 'WAIT_FOR_LIFT'")
                             
-                            # Convertir a base64
-                            template_b64 = base64.b64encode(template_bytes).decode('utf-8')
-                            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+                            elif ret == ZKFP_ERR_CAPTURE:
+                                # Normal, esperando dedo
+                                consecutive_errors = 0
+                                if self.last_capture:
+                                    self.last_capture.pop('registration_error', None)
+                                pass
                             
-                            # Actualizar última captura
-                            self.last_capture = {
-                                'template': template_b64,
-                                'image': image_b64,
-                                'timestamp': time.time(),
-                                'width': self.width,
-                                'height': self.height,
-                                'template_size': template_size.value
-                            }
-                            
-                            # Procesar según el modo
-                            if self.current_mode == "registering":
-                                self._process_registration(template_bytes)
-                            elif self.current_mode == "verifying":
-                                self._process_verification(template_bytes)
-                            
-                        except Exception as e:
-                            logger.error(f"Error al procesar captura: {e}")
+                            else:
+                                # Otro error
+                                consecutive_errors += 1
+                                # ... (copiar aquí la lógica de manejo de errores de más abajo) ...
+
                         
-                    elif ret == ZKFP_ERR_CAPTURE:
-                        # Error normal, esperando dedo
-                        consecutive_errors = 0
-                        pass
+                        # --- ESTADO 2: ESPERANDO QUE LEVANTE EL DEDO ---
+                        elif self.register_step == "WAIT_FOR_LIFT":
+                            if ret == ZKFP_ERR_OK:
+                                # El dedo SIGUE puesto. Ignorar.
+                                consecutive_errors = 0
+                                pass 
+                            
+                            elif ret == ZKFP_ERR_CAPTURE:
+                                # ¡Dedo levantado! (Error -8) 
+                                consecutive_errors = 0
+                                # Volver al estado de captura para la siguiente huella
+                                self.register_step = "CAPTURE"
+                                if self.last_capture:
+                                    self.last_capture.pop('registration_error', None)
+                                logger.info("Dedo levantado. Cambiando a estado 'CAPTURE'")
+                            
+                            else:
+                                # Otro error
+                                consecutive_errors += 1
+                                # ... (copiar aquí la lógica de manejo de errores de más abajo) ...
+
+                    # Manejo de estado para OTROS MODOS (verifying, idle)
                     else:
-                        consecutive_errors += 1
-                        error_msg = self._get_error_message(ret)
-                        
-                        if consecutive_errors == 1:
-                            logger.warning(f"Error en captura: {error_msg} (código: {ret})")
-                        
-                        if consecutive_errors >= max_consecutive_errors:
-                            logger.error(f"Demasiados errores consecutivos ({consecutive_errors}), verificando conexión")
+                        if ret == ZKFP_ERR_OK:
+                            consecutive_errors = 0
+                            try:
+                                template_bytes = bytes(template_buffer[:template_size.value])
+                                image_bytes = bytes(image_buffer[:image_buffer_size])
+                                
+                                self.last_capture = {
+                                    'template': base64.b64encode(template_bytes).decode('utf-8'),
+                                    'image': base64.b64encode(image_bytes).decode('utf-8'),
+                                    'timestamp': time.time(),
+                                    'width': self.width, 'height': self.height,
+                                    'template_size': template_size.value
+                                }
+                                
+                                if self.current_mode == "verifying":
+                                    self._process_verification(template_bytes)
+                                
+                            except Exception as e:
+                                logger.error(f"Error al procesar captura (modo no-registro): {e}")
                             
-                            # Verificar si el problema es de conexión
-                            if not self._verify_device_connection():
-                                logger.warning("Problema de conexión detectado - intentando reconexión")
-                                if self._reconnect_device():
-                                    consecutive_errors = 0
-                                    continue
+                        elif ret == ZKFP_ERR_CAPTURE:
+                            consecutive_errors = 0
+                            pass
+                        
+                        else:
+                            # ESTA ES LA LÓGICA DE MANEJO DE ERRORES (copiarla arriba también)
+                            consecutive_errors += 1
+                            error_msg = self._get_error_message(ret)
                             
-                            logger.error("No se pudo resolver el problema - deteniendo captura")
-                            break
+                            if consecutive_errors == 1:
+                                logger.warning(f"Error en captura: {error_msg} (código: {ret})")
+                            
+                            if consecutive_errors >= max_consecutive_errors:
+                                logger.error(f"Demasiados errores consecutivos ({consecutive_errors}), verificando conexión")
+                                if not self._verify_device_connection():
+                                    logger.warning("Problema de conexión detectado - intentando reconexión")
+                                    if self._reconnect_device():
+                                        consecutive_errors = 0
+                                        continue
+                                logger.error("No se pudo resolver el problema - deteniendo captura")
+                                break
+                    
+                    # =================== FIN DE FSM DE REGISTRO ===================
                     
                     time.sleep(0.1)
                     
@@ -494,9 +594,8 @@ class ZKTecoDevice:
         """Procesar registro de huella con manejo robusto de errores"""
         try:
             if self.current_mode != "registering":
-                return
+                return False # No detener el loop
             
-            # Verificar conexión antes de procesar
             if not self._verify_device_connection():
                 logger.error("❌ Dispositivo desconectado al procesar registro")
                 if self._reconnect_device():
@@ -504,12 +603,31 @@ class ZKTecoDevice:
                 else:
                     logger.error("❌ No se pudo reconectar - abortando registro")
                     self._reset_registration_state()
-                    return
+                    return True # Detener el loop por error crítico
             
             # Evitar acumulación de plantillas
             if self.register_count >= 3:
                 logger.warning("⚠️ Ya se tienen 3 plantillas, ignorando captura adicional")
-                return
+                return False # No detener el loop
+
+            # =================== INICIO DE CORRECCIÓN (Intento 2) ===================
+            # VERIFICAR SI LA HUELLA ES *EXACTAMENTE* LA MISMA (byte por byte)
+            # Esto previene errores de búfer, pero permite huellas similares.
+            
+            if template in self.register_templates:
+                logger.warning(f"⚠️ Plantilla duplicada exacta detectada. Por favor, levante el dedo y colóquelo de nuevo.")
+                
+                # Informar al frontend del error
+                if self.last_capture:
+                    self.last_capture['registration_error'] = "Huella duplicada. Levante el dedo e intente de nuevo"
+                
+                return False # No agregar esta huella, no detener el loop
+
+            # Si llegamos aquí, es una huella nueva.
+            # Limpiamos cualquier error anterior.
+            if self.last_capture:
+                 self.last_capture.pop('registration_error', None)
+            # =================== FIN DE CORRECCIÓN (Intento 2) ===================
             
             # Agregar plantilla
             self.register_templates.append(template)
@@ -521,12 +639,14 @@ class ZKTecoDevice:
             if self.last_capture:
                 self.last_capture['register_count'] = self.register_count
                 self.last_capture['registration_in_progress'] = True
+                # ✅ CRÍTICO: Asegurar que se actualice el estado
+                self.last_capture['registration_complete'] = False
             
             # Si tenemos 3 capturas, generar plantilla final
             if self.register_count >= 3:
                 logger.info("🎯 3 CAPTURAS COMPLETADAS - Preparando generación de plantilla final...")
-                logger.info("⏳ Pausa de 2 segundos para estabilizar dispositivo...")
-                time.sleep(2)
+               # logger.info("⏳ Pausa de 1.5 segundos para estabilizar dispositivo...")
+                time.sleep(1.5)
                 
                 # Verificar conexión antes de generar
                 if not self._verify_device_connection():
@@ -534,13 +654,32 @@ class ZKTecoDevice:
                     if not self._reconnect_device():
                         logger.error("❌ No se pudo reconectar - reiniciando registro")
                         self._reset_registration_state()
-                        return
+                        return True # Detener el loop por error crítico
                 
                 # Generar plantilla final
                 success = self._generate_final_template_robust()
                 
                 if success:
                     logger.info("✅ REGISTRO COMPLETADO EXITOSAMENTE")
+                 #   return True # *** DEVOLVER TRUE PARA DETENER EL LOOP ***
+      
+                    # ✅ VERIFICAR que la plantilla final esté en last_capture
+                    if self.last_capture and 'final_template' in self.last_capture:
+                        logger.info(f"✅ Plantilla final confirmada en last_capture (tamaño: {len(self.last_capture['final_template'])})")
+                        
+                        # ✅ FORZAR actualización del estado
+                        self.last_capture['registration_complete'] = True
+                        self.last_capture['registration_in_progress'] = False
+                        
+                        # ✅ AGREGAR: Timestamp para verificar actualización
+                        self.last_capture['completion_timestamp'] = time.time()
+                        
+                        logger.info("✅ Estado de registro actualizado: registration_complete=True")
+                    else:
+                        logger.error("❌ Plantilla final NO encontrada en last_capture después de generación")
+                        return False
+                    
+                    return True                                     
                 else:
                     logger.error("❌ No se pudo generar plantilla final")
                     # Mantener 2 plantillas para reintentar
@@ -550,12 +689,15 @@ class ZKTecoDevice:
                         if self.last_capture:
                             self.last_capture['register_count'] = 2
                             self.last_capture['registration_error'] = "Error al generar plantilla final"
+                    return False # No detener, permitir reintento
             else:
                 logger.info(f"⏳ Progreso: {self.register_count}/3 capturas")
+                return False # No detener, continuar capturando
                         
         except Exception as e:
             logger.exception(f"❌ ERROR CRÍTICO en _process_registration: {e}")
             self._reset_registration_state()
+            return True # Detener el loop por error crítico
 
     def _generate_final_template_robust(self):
         """Genera plantilla final con reintentos y manejo robusto de errores"""
@@ -563,12 +705,17 @@ class ZKTecoDevice:
             if not self._validate_templates():
                 logger.error("❌ Validación de plantillas falló")
                 return False
-            
+
+            # ✅ VERIFICAR db_handle
+            if not self.db_handle:
+                logger.error("❌ db_handle no disponible para GenRegTemplate")
+                return False
+
             max_attempts = 3
             
             for attempt in range(1, max_attempts + 1):
                 try:
-                    logger.info(f"🔄 Intento {attempt} de {max_attempts} - Estrategia: normal")
+                    logger.info(f"🔄 Intento {attempt} de {max_attempts}")
                     
                     # Verificar handle válido
                     if not self.device_handle or self.device_handle <= 0:
@@ -591,7 +738,7 @@ class ZKTecoDevice:
                     
                     # Llamar a GenRegTemplate
                     ret = zkfp.ZKFPM_GenRegTemplate(
-                        self.device_handle,
+                        self.db_handle,
                         template1,
                         template2,
                         template3,
@@ -621,7 +768,7 @@ class ZKTecoDevice:
                         
                     elif ret == ZKFP_ERR_INVALID_HANDLE:
                         logger.error(f"❌ Error al generar plantilla (intento {attempt}): Handle inválido")
-                        logger.warning("🔧 Error de handle inválido - intentando recuperación...")
+                      #  logger.warning("🔧 Error de handle inválido - intentando recuperación...")
                         
                         if self._reconnect_device():
                             continue
@@ -688,6 +835,7 @@ class ZKTecoDevice:
             self.register_count = 0
             self.register_templates = []
             self.current_mode = "idle"
+            self.register_step = "CAPTURE"            
             # Limpiar solo datos de registro del last_capture
             if self.last_capture:
                 for field in ['registration_complete', 'final_template', 'register_count', 'registration_in_progress', 'registration_error']:
@@ -721,7 +869,23 @@ class ZKTecoDevice:
                 
                 if ret == ZKFP_ERR_OK or ret == ZKFP_ERR_ALREADY_INIT:
                     self.is_initialized = True
-                    
+                    # --- INICIO DE CORRECCIÓN ---
+                    # Crear el handle de la caché de algoritmos (DB Handle)
+                    if not self.db_handle:
+                        try:
+                            self.db_handle = zkfp.ZKFPM_DBInit()
+                            if self.db_handle:
+                                logger.info(f"✅ Cache de algoritmos (db_handle) creada: {self.db_handle}")
+                            else:
+                                logger.error("❌ No se pudo crear la cache de algoritmos (db_handle)")
+                                return {
+                                    'success': False,
+                                    'message': 'No se pudo inicializar la caché de algoritmos'
+                                }
+                        except Exception as e:
+                            logger.error(f"Excepción en ZKFPM_DBInit: {e}")
+                            return {'success': False, 'message': f'Error en DBInit: {str(e)}'}
+                    # --- FIN DE CORRECCIÓN ---                    
                     try:
                         device_count = zkfp.ZKFPM_GetDeviceCount()
                         logger.info(f"Dispositivos detectados: {device_count}")
@@ -979,7 +1143,7 @@ class ZKTecoDevice:
         if mode == "registering":
             self.register_count = 0
             self.register_templates = []
-        
+            self.register_step = "CAPTURE"        
         return {
             'success': True,
             'mode': mode,
@@ -1058,7 +1222,15 @@ class ZKTecoDevice:
                     'success': False,
                     'message': 'SDK no disponible o dispositivo no conectado'
                 }
-            
+
+            # ❌ CRÍTICO: Necesitamos db_handle, no device_handle
+            if not self.db_handle:
+                logger.error("db_handle no inicializado para comparación")
+                return {
+                    'success': False,
+                    'message': 'Cache de algoritmos no inicializado'
+                }
+
             # Decodificar plantillas
             try:
                 template1_bytes = base64.b64decode(template1_b64)
@@ -1076,7 +1248,7 @@ class ZKTecoDevice:
             
             # Comparar plantillas
             score = zkfp.ZKFPM_DBMatch(
-                self.device_handle,
+                self.db_handle,
                 temp1,
                 len(template1_bytes),
                 temp2,
@@ -1086,7 +1258,7 @@ class ZKTecoDevice:
             logger.info(f"Comparación de plantillas - Score: {score}")
             
             # Umbral de coincidencia
-            MATCH_THRESHOLD = 60
+            # MATCH_THRESHOLD = 60
             is_match = score >= MATCH_THRESHOLD
             
             return {
@@ -1149,61 +1321,6 @@ class ZKTecoDevice:
             return {
                 'success': False,
                 'message': f'Error al resetear: {str(e)}'
-            }
-
-    def save_fingerprint_to_database(self, employee_id, finger_index, template_b64):
-        """Guarda la plantilla de huella en la base de datos"""
-        try:
-            logger.info(f"💾 Guardando huella en BD - Empleado: {employee_id}, Dedo: {finger_index}")
-            
-            import mysql.connector
-            
-            # Configurar conexión (AJUSTAR CREDENCIALES)
-            conn = mysql.connector.connect(
-                host='localhost',
-                user='root',
-                password='',  # Ajustar tu contraseña
-                database='fingerprint_db'  # Ajustar nombre de tu BD
-            )
-            
-            cursor = conn.cursor()
-            
-            # Decodificar template
-            template_bytes = base64.b64decode(template_b64)
-            template_hex = template_bytes.hex()
-            
-            # Query con UPDATE si ya existe
-            query = """
-                INSERT INTO fingerprints 
-                (employee_id, finger_index, template, template_size, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, NOW(), NOW())
-                ON DUPLICATE KEY UPDATE
-                template = VALUES(template),
-                template_size = VALUES(template_size),
-                updated_at = NOW()
-            """
-            
-            values = (employee_id, finger_index, template_hex, len(template_bytes))
-            
-            cursor.execute(query, values)
-            conn.commit()
-            
-            logger.info(f"✅ Huella guardada exitosamente - ID: {cursor.lastrowid}")
-            
-            cursor.close()
-            conn.close()
-            
-            return {
-                'success': True,
-                'message': 'Huella guardada exitosamente',
-                'record_id': cursor.lastrowid
-            }
-            
-        except Exception as e:
-            logger.exception(f"❌ Error guardando en BD: {e}")
-            return {
-                'success': False,
-                'message': f'Error al guardar: {str(e)}'
             }
 
 # ==================== INSTANCIA GLOBAL ====================
@@ -1328,6 +1445,154 @@ def compare_templates():
     result = device.compare_templates(template1, template2)
     return jsonify(result)
 
+# bridge_service.py - Agregar la nueva ruta (por ejemplo, después de @app.route('/api/registration/reset', methods=['POST']))
+
+@app.route('/api/db/match_one_to_many', methods=['POST'])
+def match_one_to_many_api():
+    """
+    Verifica una plantilla capturada contra TODAS las plantillas en la BD (1:N).
+    Esta es la nueva arquitectura segura.
+    """
+    if not SDK_AVAILABLE:
+        return jsonify({'success': False, 'message': 'SDK no disponible para matching.'}), 500
+
+    data = request.get_json()
+    captured_template_b64 = data.get('captured_template')
+
+    if not captured_template_b64:
+        return jsonify({'success': False, 'message': 'Plantilla de huella capturada faltante.'}), 400
+
+    # ✅ VERIFICAR db_handle
+    if not device.db_handle:
+        logger.error("❌ db_handle no disponible para matching 1:N")
+        return jsonify({'success': False, 'message': 'Cache de algoritmos no inicializado.'}), 500
+
+    # 1. Recuperar plantillas registradas desde la API PHP (SEGURIDAD)
+    try:
+        logger.info(f"Obteniendo plantillas registradas desde API PHP...")
+        # Llama a la nueva ruta segura en api.php
+        response = requests.get(f"{PHP_API_URL}?action=get_verification_data")
+        response.raise_for_status() # Lanza excepción para errores HTTP
+        
+        db_data = response.json()
+        if not db_data.get('success'):
+            logger.error(f"Error al obtener datos de verificación desde API: {db_data.get('message')}")
+            return jsonify({'success': False, 'message': 'Error al cargar datos de verificación de la BD.'}), 500
+        
+        registered_templates = db_data.get('data', [])
+        if not registered_templates:
+            logger.warning("No hay plantillas registradas en la BD para comparar.")
+            return jsonify({'success': True, 'match': False, 'message': 'No hay huellas registradas en el sistema.'})
+
+        logger.info(f"Plantillas obtenidas para matching: {len(registered_templates)}")
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error de conexión con API PHP: {e}")
+        return jsonify({'success': False, 'message': f'Error de conexión con el servicio API PHP: {e}'}), 500
+    
+    # except Exception as e:
+    #    logger.error(f"Error inesperado al procesar datos de la API: {e}")
+    #    return jsonify({'success': False, 'message': 'Error interno al procesar plantillas.'}), 500
+
+    # 2. Convertir la plantilla capturada
+    try:
+        template_bytes = base64.b64decode(captured_template_b64)
+        
+        # Bloqueo del dispositivo para asegurar el acceso exclusivo al SDK.
+        with device._lock:
+            # Convertir la plantilla capturada UNA SOLA VEZ
+            template1 = (ctypes.c_ubyte * len(template_bytes)).from_buffer_copy(template_bytes)
+
+            # 3. Realizar el matching 1:N
+            matched_user = None
+            best_score = 0
+            
+            for template_data in registered_templates:
+                try:
+                    registered_template_bytes = base64.b64decode(template_data.get('template'))
+                    template2 = (ctypes.c_ubyte * len(registered_template_bytes)).from_buffer_copy(registered_template_bytes)
+
+                    # ZKFPM_DBMatch (handle, temp1, len1, temp2, len2)
+                    score = zkfp.ZKFPM_DBMatch(
+                        device.db_handle,
+                        template1,
+                        len(template_bytes),
+                        template2,
+                        len(registered_template_bytes)
+                    )
+
+                    if score > best_score:
+                        best_score = score
+
+                    if score >= MATCH_THRESHOLD:
+                        matched_user = template_data
+                        matched_user['score'] = score
+                        break # Encontrado! Salir del loop 1:N
+
+                except Exception as e:
+                    logger.error(f"Error en ZKFPM_DBMatch para usuario {template_data.get('user_id_str')}: {e}")
+                    # Continuar con el siguiente
+                    
+        # 3. Devolver resultado
+        if matched_user:
+            logger.info(f"✅ Coincidencia encontrada para {matched_user.get('user_id_str')} con score {matched_user.get('score')}")
+            return jsonify({
+                'success': True,
+                'match': True,
+                'matched_user': {
+                    'id': matched_user.get('user_internal_id'),
+                    'user_id': matched_user.get('user_id_str'),
+                    'name': matched_user.get('name'),
+                    'finger_index': matched_user.get('finger_index'),
+                    'score': matched_user.get('score')
+                },
+                'best_score': best_score
+            })
+        else:
+            logger.info(f"❌ No se encontró coincidencia (Mejor score: {best_score})")
+            return jsonify({
+                'success': True,
+                'match': False,
+                'message': 'Huella no reconocida',
+                'best_score': best_score
+            })
+            
+    except Exception as e:
+        logger.error(f"Error crítico en match_one_to_many_api: {e}")
+        return jsonify({'success': False, 'message': 'Error interno durante el matching.'}), 500
+
+@app.route('/api/debug/last_capture', methods=['GET'])
+def debug_last_capture():
+    """Endpoint para inspeccionar el estado actual de last_capture"""
+    try:
+        if device.last_capture:
+            # Crear copia sin la imagen para reducir payload
+            debug_data = {k: v for k, v in device.last_capture.items() if k not in ['image', 'template']}
+            
+            # Agregar información de longitud de datos grandes
+            if 'final_template' in device.last_capture:
+                debug_data['final_template_length'] = len(device.last_capture['final_template'])
+            if 'template' in device.last_capture:
+                debug_data['template_length'] = len(device.last_capture['template'])
+            
+            return jsonify({
+                'success': True,
+                'last_capture': debug_data,
+                'current_mode': device.current_mode,
+                'register_count': device.register_count,
+                'is_capturing': device.is_capturing
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'message': 'No hay datos en last_capture',
+                'current_mode': device.current_mode,
+                'register_count': device.register_count
+            })
+    except Exception as e:
+        logger.error(f"Error en debug_last_capture: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+        
 @app.route('/api/debug/registration_status', methods=['GET'])
 def debug_registration_status():
     """Endpoint de debugging para estado de registro"""
@@ -1355,36 +1620,6 @@ def reset_registration():
     result = device.reset_registration()
     return jsonify(result)
 
-@app.route('/api/fingerprint/save', methods=['POST'])
-def save_fingerprint():
-    """Guardar plantilla final en base de datos"""
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({
-            'success': False,
-            'message': 'Datos no proporcionados'
-        }), 400
-    
-    employee_id = data.get('employee_id')
-    finger_index = data.get('finger_index', 0)
-    template = data.get('template')
-    
-    if not employee_id or not template:
-        return jsonify({
-            'success': False,
-            'message': 'employee_id y template son requeridos'
-        }), 400
-    
-    logger.info(f"Solicitud: Guardar huella - Empleado: {employee_id}, Dedo: {finger_index}")
-    result = device.save_fingerprint_to_database(employee_id, finger_index, template)
-    
-    # Si se guardó exitosamente, resetear el estado de registro
-    if result.get('success'):
-        device.reset_registration()
-    
-    return jsonify(result)
-
 @app.errorhandler(404)
 def not_found(error):
     """Manejo de rutas no encontradas"""
@@ -1408,7 +1643,7 @@ def internal_error(error):
 if __name__ == '__main__':
     print("=" * 60)
     print("ZKTeco USB Bridge Service v4.0.0 - VERSIÓN FINAL")
-    print("Sistema Completamente Corregido - Sin Deadlocks")
+    print("Sistema de Registro Biométrico de Usuarios")
     print("=" * 60)
     print(f"SDK Disponible: {'Sí' if SDK_AVAILABLE else 'No'}")
     print(f"Iniciando servicio en http://localhost:5000")

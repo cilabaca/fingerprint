@@ -430,7 +430,10 @@
                 <!-- ✅ BOTÓN DE DEBUGGING -->
                 <button class="btn btn-info" onclick="debugRegistrationStatus()" style="background: #17a2b8;">
                     🐛 Debug Estado
-                </button>                
+                </button>               
+                <button class="btn" onclick="debugLastCapture()" style="background: #6f42c1; color: white;">
+                    🔬 Ver Last Capture
+                </button>                 
             </div>
         </div>
 
@@ -745,6 +748,30 @@
             }
         }        
 
+        async function debugLastCapture() {
+            try {
+                console.log('🔬 Solicitando last_capture...');
+                const response = await fetch(`${BRIDGE_URL}/api/debug/last_capture`);
+                const data = await response.json();
+                
+                console.log('📊 LAST CAPTURE:', data);
+                
+                if (data.success) {
+                    alert(`🔬 Last Capture:\n` +
+                        `Modo: ${data.current_mode}\n` +
+                        `Capturas: ${data.register_count}\n` +
+                        `Capturando: ${data.is_capturing}\n` +
+                        `\nDatos en last_capture:\n` +
+                        JSON.stringify(data.last_capture, null, 2));
+                } else {
+                    alert(`No hay datos: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('❌ Error en debug:', error);
+                alert('Error al obtener last_capture');
+            }
+        }
+
         async function startRegistration() {
             const userId = document.getElementById('userId').value.trim();
             const userName = document.getElementById('userName').value.trim();
@@ -812,6 +839,8 @@
 
         function startCapture() {
             if (captureInterval) return;
+
+            console.log('🎥 Iniciando captura continua...');
             
             captureInterval = setInterval(async () => {
                 try {
@@ -819,12 +848,25 @@
                     const data = await response.json();
                     
                     if (data.success && data.data) {
+                        // ✅ LOGGING MEJORADO
+                        if (isRegistering) {
+                            console.log('📸 Captura recibida:', {
+                                count: data.data.register_count,
+                                complete: data.data.registration_complete,
+                                hasFinal: !!data.data.final_template,
+                                inProgress: data.data.registration_in_progress
+                            });
+                        }
+
                         processCapture(data.data);
+                    } else if (!data.success && data.message) {
+                        // ✅ MANEJAR ERRORES DEL BACKEND
+                        console.warn('⚠️ Backend reportó:', data.message);
                     }
                 } catch (error) {
                     console.error('Error en captura:', error);
                 }
-            }, 500);
+            }, 800); // ✅ AUMENTAR intervalo a 800ms para evitar saturación
         }
 
         function stopCapture() {
@@ -862,24 +904,26 @@
             }
         }
 
-        async function processRegistrationCapture(captureData) {
+    async function processRegistrationCapture(captureData) {
             console.log('📝 Procesando captura de registro:', {
                 registerCount: captureData.register_count,
                 complete: captureData.registration_complete,
                 hasFinal: !!captureData.final_template,
-                error: captureData.registration_error
+                error: captureData.registration_error,
+                timestamp: captureData.completion_timestamp
             });
             
-            // ✅ CORRECCIÓN: DETECTAR ERROR DE REGISTRO PRIMERO
+            // ✅ PRIORIDAD 1: DETECTAR ERROR DE REGISTRO PRIMERO
             if (captureData.registration_error) {
                 console.error('❌ Error en registro:', captureData.registration_error);
                 showAlert('alertRegister', `Error: ${captureData.registration_error}`, 'error');
-                stopCapture();
-                isRegistering = false;
-                return;
+                
+                // NO detenga la captura, solo muestre el error y espere
+                // a que el usuario levante el dedo.
+                return; 
             }
             
-            // ✅ CORRECCIÓN: ACTUALIZAR PROGRESO SI HAY CONTADOR
+            // ✅ PRIORIDAD 2: ACTUALIZAR PROGRESO SI HAY CONTADOR
             if (captureData.register_count !== undefined && captureData.register_count !== null) {
                 updateProgress(captureData.register_count);
                 
@@ -890,10 +934,12 @@
                 }
             }
             
-            // ✅ CORRECCIÓN CRÍTICA: DETECTAR COMPLETACIÓN DE REGISTRO CON PLANTILLA
+            // ✅ PRIORIDAD 3: DETECCIÓN CRÍTICA DE COMPLETITUD
+            // Verificar AMBAS condiciones: registration_complete === true Y final_template existe
             if (captureData.registration_complete && captureData.final_template) {
                 console.log('🎯 REGISTRO COMPLETADO - Plantilla final recibida:', {
-                    templateLength: captureData.final_template.length
+                    templateLength: captureData.final_template.length,
+                    timestamp: captureData.completion_timestamp
                 });
                 
                 // DETENER CAPTURA INMEDIATAMENTE
@@ -902,16 +948,28 @@
                 
                 // ✅ MOSTRAR CONFIRMACIÓN
                 showAlert('alertRegister', '✅ 3 capturas completadas. Guardando huella...', 'success');
-                
-                // GUARDAR HUELLA
-                await saveFingerprint(captureData.final_template);
-                
-            } else if (captureData.registration_complete && !captureData.final_template) {
-                console.error('❌ Registro marcado como completo pero sin plantilla final');
-                showAlert('alertRegister', 'Error: Registro completo pero sin plantilla', 'error');
+
+                // ✅ GUARDAR CON PEQUEÑO DELAY PARA ASEGURAR QUE EL ESTADO SE ACTUALIZÓ
+                setTimeout(async () => {
+                    await saveFingerprint(captureData.final_template);
+                }, 500);                
+
+                return; // Salir de la función
+
+            }
+            // ✅ DETECCIÓN DE ESTADOS INTERMEDIOS
+            if (captureData.register_count >= 3 && !captureData.registration_complete) {
+                console.log('⏳ Esperando generación de plantilla final...');
+                // No hacer nada, seguir esperando
+            }
+            
+            // ✅ ALERTA SI HAY INCONSISTENCIA
+            if (captureData.registration_complete === true && !captureData.final_template) {
+                console.error('❌ INCONSISTENCIA: Registro marcado completo pero sin plantilla');
+                showAlert('alertRegister', '❌ Error: Registro completo pero sin plantilla. Reintente.', 'error');
                 stopCapture();
                 isRegistering = false;
-            }
+            }            
         }
 
         async function saveFingerprint(template) {
@@ -1041,6 +1099,26 @@
             }
         }
 
+// ✅ *** NUEVA FUNCIÓN AÑADIDA ***
+        // Esta función faltaba y rompía la verificación.
+        async function processVerificationCapture(captureData) {
+            // Comprobar si el bridge tiene una plantilla lista para verificar
+            if (captureData.ready_for_verification && captureData.template) {
+                console.log('✅ Huella lista para verificación. Deteniendo captura.');
+                
+                // Detener el sondeo inmediatamente
+                stopCapture(); 
+                
+                // Mostrar "procesando"
+                showAlert('alertVerify', '🔍 Huella capturada. Verificando...', 'info');
+                
+                // Llamar a la lógica de verificación principal
+                await verifyFingerprint(captureData.template);
+            }
+        }
+
+        let verificationTimeout = null;
+
         // Funciones de Verificación
         async function startVerification() {
             isVerifying = true;
@@ -1056,144 +1134,120 @@
             });
             
             startCapture();
+
+            // ✅ AGREGAR: Timeout de 30 segundos
+            verificationTimeout = setTimeout(() => {
+                if (isVerifying) {
+                    showAlert('alertVerify', '⏱️ Tiempo de verificación agotado', 'info');
+                    stopVerification();
+                }
+            }, 30000);
+            
         }
 
         function stopVerification() {
+            // ✅ AGREGAR: Limpiar timeout
+            if (verificationTimeout) {
+                clearTimeout(verificationTimeout);
+                verificationTimeout = null;
+            }
+            
             stopCapture();
             document.getElementById('btnStartVerify').style.display = 'inline-block';
             document.getElementById('btnStopVerify').style.display = 'none';
             document.getElementById('verifyResult').innerHTML = '';
         }
 
+// index.html - Reemplazar la función completa async function verifyFingerprint(template)
+
         async function verifyFingerprint(template) {
             try {
-                // Paso 1: Obtener todos los usuarios registrados de la BD
-                const response = await fetch(`${API_URL}?action=verify`, {
+                // CORRECCIÓN DE SEGURIDAD:
+                // Ya NO se obtienen todas las plantillas en el cliente.
+                // Se llama al nuevo endpoint del Bridge, que hace la verificación 1:N.
+                const matchResponse = await fetch(`${BRIDGE_URL}/api/db/match_one_to_many`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'application/json'
-                    },
-                    body: JSON.stringify({template: template})
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        captured_template: template // Solo enviamos la plantilla capturada
+                    })
                 });
-                
-                const data = await response.json();
-                
-                if (!data.success || !data.users || data.users.length === 0) {
-                    showAlert('alertVerify', '❌ No hay usuarios registrados para comparar', 'error');
+
+                const matchData = await matchResponse.json();
+
+                // Verificar si la llamada al bridge falló
+                if (!matchData.success) {
+                    showAlert('alertVerify', `Error del servicio Bridge: ${matchData.message}`, 'error');
+                    stopVerification(); // Detener el proceso
                     return;
                 }
-                
-                console.log(`Comparando contra ${data.users.length} usuarios registrados...`);
-                
-                // Paso 2: Comparar la plantilla capturada con cada usuario usando el SDK
-                let matchFound = false;
-                let matchedUser = null;
-                let bestScore = 0;
-                
-                document.getElementById('verifyResult').innerHTML = `
-                    <div class="alert alert-info show">
-                        <p>🔍 Buscando coincidencia en ${data.users.length} usuarios...</p>
-                    </div>
-                `;
-                
-                for (const user of data.users) {
-                    try {
-                        // Llamar al bridge service para comparar usando el SDK
-                        const compareResponse = await fetch(`${BRIDGE_URL}/api/compare`, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json'
-                            },
-                            body: JSON.stringify({
-                                template1: template,  // Plantilla capturada
-                                template2: user.fingerprint_template  // Plantilla de la BD
-                            })
-                        });
-                        
-                        const compareResult = await compareResponse.json();
-                        
-                        console.log(`Comparación con ${user.name}:`, compareResult);
-                        
-                        if (compareResult.success && compareResult.match) {
-                            // Encontramos una coincidencia
-                            if (compareResult.score > bestScore) {
-                                matchFound = true;
-                                matchedUser = user;
-                                bestScore = compareResult.score;
-                            }
-                        }
-                        
-                    } catch (error) {
-                        console.error(`Error al comparar con usuario ${user.user_id}:`, error);
-                    }
-                }
-                
-                // Paso 3: Mostrar resultado
-                if (matchFound && matchedUser) {
+
+                // Si hay coincidencia (matchData.match es true)
+                if (matchData.match) {
+                    const matchedUser = matchData.matched_user;
+
                     document.getElementById('verifyResult').innerHTML = `
                         <div class="alert alert-success show">
-                            <h3>✅ Acceso Autorizado</h3>
-                            <p><strong>Usuario:</strong> ${matchedUser.name}</p>
-                            <p><strong>ID:</strong> ${matchedUser.user_id}</p>
-                            <p><strong>Score de coincidencia:</strong> ${bestScore}%</p>
+                            <h3>✅ Acceso Permitido (Score: ${matchedUser.score}%)</h3>
+                            <p>Bienvenido: <strong>${matchedUser.name}</strong> (ID: ${matchedUser.user_id})</p>
+                            <p>Huella: Dedo ${matchedUser.finger_index}</p>
                         </div>
                     `;
+                    showAlert('alertVerify', '✅ Verificación Exitosa', 'success');
                     
-                    showAlert('alertVerify', `✅ Identidad verificada: ${matchedUser.name}`, 'success');
-                    
-                    // Registrar log de acceso exitoso
+                    // Registrar acceso exitoso (usando el id interno devuelto por el bridge)
                     await fetch(`${API_URL}?action=log_access`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            user_id: matchedUser.id,
-                            status: 'success',
-                            method: 'fingerprint'
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            user_id: matchedUser.id, // ID interno (INT)
+                            status: 'success', 
+                            method: 'fingerprint' 
                         })
                     });
-                    
+
                     // Detener verificación después de 3 segundos
                     setTimeout(() => {
                         stopVerification();
                     }, 3000);
                     
                 } else {
+                    // No hay coincidencia (matchData.match es false)
                     document.getElementById('verifyResult').innerHTML = `
                         <div class="alert alert-error show">
                             <h3>❌ Acceso Denegado</h3>
-                            <p>Huella no reconocida en el sistema</p>
+                            <p>${matchData.message || 'Huella no reconocida'}</p>
+                            <p>(Mejor Score: ${matchData.best_score || 0}%)</p>
                         </div>
                     `;
-                    
                     showAlert('alertVerify', '❌ Huella no reconocida', 'error');
-                    
+
                     // Registrar intento fallido
                     await fetch(`${API_URL}?action=log_access`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            user_id: null,
-                            status: 'failed',
-                            method: 'fingerprint'
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            user_id: null, 
+                            status: 'failed', 
+                            method: 'fingerprint' 
                         })
                     });
+                    
+                    // Permitir un nuevo intento reiniciando la verificación
+                    // (el usuario puede volver a poner el dedo)
+                    setTimeout(() => {
+                        startVerification();
+                    }, 1500);
                 }
-                
+
             } catch (error) {
                 console.error('Error en verificación:', error);
                 showAlert('alertVerify', `Error al verificar: ${error.message}`, 'error');
-                
-                document.getElementById('verifyResult').innerHTML = `
-                    <div class="alert alert-error show">
-                        <h3>⚠️ Error del Sistema</h3>
-                        <p>Error al procesar verificación: ${error.message}</p>
-                    </div>
-                `;
+                stopVerification();
+            } finally {
+                // isVerifying se mantiene true si queremos reintentar, 
+                // o se pone false en stopVerification()
+                isVerifying = false;
             }
         }
 
