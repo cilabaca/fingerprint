@@ -1,2 +1,2 @@
 # fingerprint
-test biometric fingerprint scanner on php
+testing biometric fingerprint scanner (ZKTeco 4500) on PHP. Sistem currently developing with AI assistance.
